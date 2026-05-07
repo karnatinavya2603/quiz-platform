@@ -1,0 +1,11 @@
+question,sample_input,sample_output
+Write a program to reverse a string,hello,olleh
+Write a program to find the sum of numbers in a list,"1 2 3",6
+Write a program to find the largest number in a list,"10 5 8",10
+Write a program to count vowels in a string,hello,2
+Write a program to find the factorial of a number,5,120
+Write a program to check if a string is a palindrome,racecar,Yes
+Write a program to sort a list of numbers,"3 1 2","1 2 3"
+Write a program to check if a number is even or odd,4,Even
+Write a program to print the Fibonacci series up to n terms,5,"0 1 1 2 3"
+Write a program to find the maximum element in a list,"7 9 2",9

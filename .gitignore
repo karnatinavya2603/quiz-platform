@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+quiz.db
+check_db.py
+check_db2.py
+cleanup.py
+seed_coding.py
+.git/

@@ -1,10 +1,11 @@
+import sys
 import subprocess
 
 
 def run_code(code, inp=""):
     try:
         result = subprocess.run(
-            ["python3", "-c", code],
+            [sys.executable, "-c", code],
             input=inp, text=True, capture_output=True, timeout=5
         )
         return result.stdout.strip() if result.stdout else result.stderr.strip()

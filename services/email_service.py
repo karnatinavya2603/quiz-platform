@@ -58,8 +58,8 @@ def notify_user_login(to_email, username):
     send_email_async(to_email, "Quiz Platform — Login Successful", body)
 
 
-def notify_admin_registration(username, email, role, token):
-    approve_url = f"http://127.0.0.1:5000/approve_token/{token}"
+def notify_admin_registration(username, email, role, token, base_url):
+    approve_url = f"{base_url.rstrip('/')}/approve_token/{token}"
     body = f"""
     <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;padding:24px;">
       <h3>New Registration — Approval Needed</h3>
@@ -76,13 +76,14 @@ def notify_admin_registration(username, email, role, token):
     send_email_async(ADMIN_EMAIL, f"[Quiz] New Registration ({role}): {username}", body)
 
 
-def send_approval_email(to_email, username):
+def send_approval_email(to_email, username, base_url):
+    login_url = f"{base_url.rstrip('/')}/login"
     body = f"""
     <div style="font-family:Arial;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;padding:24px;">
       <h2 style="color:#28a745;">Account Approved!</h2>
       <p>Hello <b>{username}</b>,</p>
       <p>Your account has been approved. You can now login:</p>
-      <a href="http://127.0.0.1:5000/login"
+      <a href="{login_url}"
          style="display:inline-block;padding:12px 28px;background:#007bff;color:#fff;
                 text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold;">
         Login Now

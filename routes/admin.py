@@ -21,11 +21,10 @@ SIDEBAR = """
 <div class="d-flex" style="min-height:100vh;">
   <div class="sidebar">
     <div class="brand">Quiz Admin</div>
-    <a href="/admin">Dashboard</a>
-    <a href="/admin/users">Manage Users</a>
-    <a href="/admin/add_mcq" class="{{ 'active' if active=='mcq' else '' }}">Add MCQ</a>
-    <a href="/admin/add_coding" class="{{ 'active' if active=='coding' else '' }}">Add Coding</a>
-    <a href="/admin/upload" class="{{ 'active' if active=='upload' else '' }}">Upload Questions</a>
+    <a href="/admin" class="{{ 'active' if active=='dashboard' else '' }}">Dashboard</a>
+    <a href="/admin/quizzes" class="{{ 'active' if active=='quizzes' else '' }}">Manage Quizzes</a>
+    <a href="/admin/categories" class="{{ 'active' if active=='categories' else '' }}">Manage Questions</a>
+    <a href="/admin/analytics" class="{{ 'active' if active=='analytics' else '' }}">User Analytics</a>
     <a href="/logout" style="color:#e74c3c;margin-top:20px;">Logout</a>
   </div>
   <div class="main">
@@ -67,47 +66,34 @@ def admin():
     not_started = sum(1 for u in users if u['quiz_status'] == 'not_started' and u['approved'])
     total_logins = conn.execute("SELECT SUM(login_count) FROM users WHERE role='user'").fetchone()[0] or 0
 
-    try:
-        mcq_total = conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0]
-        mcq_count = conn.execute("SELECT COUNT(*) FROM questions WHERE published=1").fetchone()[0]
-    except Exception:
-        mcq_total = mcq_count = 0
-    try:
-        coding_total = conn.execute("SELECT COUNT(*) FROM coding_questions").fetchone()[0]
-        coding_count = conn.execute("SELECT COUNT(*) FROM coding_questions WHERE published=1").fetchone()[0]
-    except Exception:
-        coding_total = coding_count = 0
+    mcq_total = conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0]
+    mcq_count = conn.execute("SELECT COUNT(*) FROM questions WHERE published=1").fetchone()[0]
+    coding_total = conn.execute("SELECT COUNT(*) FROM coding_questions").fetchone()[0]
+    coding_count = conn.execute("SELECT COUNT(*) FROM coding_questions WHERE published=1").fetchone()[0]
+    quizzes = conn.execute("""
+        SELECT q.*, c.name as cat_name, c.type as cat_type,
+        (SELECT COUNT(*) FROM quiz_topics WHERE quiz_id = q.id) + 
+        (SELECT COUNT(*) FROM quiz_manual_questions WHERE quiz_id = q.id) as q_count
+        FROM quizzes q
+        JOIN categories c ON q.category_id = c.id
+        ORDER BY q.id DESC
+    """).fetchall()
     conn.close()
 
-    return render_template_string(CSS + """
+    return render_template_string(CSS + SIDEBAR + """
     <style>
       .stat-card { border-radius:12px; padding:20px; color:#fff; text-align:center; }
       .stat-card h2 { font-size:2.5rem; font-weight:700; margin:0; }
       .stat-card p  { margin:4px 0 0; font-size:.95rem; opacity:.9; }
-      .sidebar { background:#1e2a3a; min-height:100vh; padding:20px 0; }
-      .sidebar a { display:block; color:#adb5bd; padding:10px 24px; text-decoration:none; font-size:.95rem; }
-      .sidebar a:hover, .sidebar a.active { background:#2c3e50; color:#fff; border-left:3px solid #0d6efd; }
-      .sidebar .brand { color:#fff; font-size:1.2rem; font-weight:700; padding:10px 24px 20px; border-bottom:1px solid #2c3e50; margin-bottom:10px; }
-      .main { padding:28px; background:#f0f2f5; min-height:100vh; }
       .badge-status { font-size:.8rem; padding:5px 10px; border-radius:20px; }
     </style>
-    <div class="d-flex" style="min-height:100vh;">
-      <div class="sidebar" style="width:220px;flex-shrink:0;">
-        <div class="brand">Quiz Admin</div>
-        <a href="/admin" class="active">Dashboard</a>
-        <a href="/admin/users">Manage Users</a>
-        <a href="/admin/add_mcq">Add MCQ</a>
-        <a href="/admin/add_coding">Add Coding</a>
-        <a href="/admin/upload">Upload Questions</a>
-        <a href="/logout" style="color:#e74c3c;margin-top:20px;">Logout</a>
-      </div>
-      <div class="main flex-grow-1">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
           <div>
             <h4 class="mb-0">Welcome back, <b>{{ username }}</b></h4>
             <small class="text-muted">{{ now }}</small>
           </div>
         </div>
+
 
         <div class="row g-3 mb-4">
           <div class="col-md-3">
@@ -152,78 +138,227 @@ def admin():
 
         <div class="row g-3 mb-4">
           <div class="col-md-6">
-            <div class="card p-3 text-center">
-              <h5 class="text-muted">MCQ Questions</h5>
-              <h2 class="text-primary">{{ mcq_count }}</h2>
-              <p class="text-muted mb-1" style="font-size:.82rem;">Published &nbsp;|&nbsp; {{ mcq_total }} Total</p>
-              <a href="/admin/add_mcq" class="btn btn-sm btn-outline-primary mt-1">+ Add MCQ</a>
+            <div class="card p-3 text-center shadow-sm border-0">
+              <h5 class="text-muted small fw-bold">MCQ QUESTIONS</h5>
+              <h2 class="text-primary fw-bold">{{ mcq_total }}</h2>
+              <p class="text-muted mb-0" style="font-size:.82rem;">Total questions in database</p>
             </div>
           </div>
           <div class="col-md-6">
-            <div class="card p-3 text-center">
-              <h5 class="text-muted">Coding Questions</h5>
-              <h2 class="text-success">{{ coding_count }}</h2>
-              <p class="text-muted mb-1" style="font-size:.82rem;">Published &nbsp;|&nbsp; {{ coding_total }} Total</p>
-              <a href="/admin/add_coding" class="btn btn-sm btn-outline-success mt-1">+ Add Coding</a>
+            <div class="card p-3 text-center shadow-sm border-0">
+              <h5 class="text-muted small fw-bold">CODING QUESTIONS</h5>
+              <h2 class="text-success fw-bold">{{ coding_total }}</h2>
+              <p class="text-muted mb-0" style="font-size:.82rem;">Total tasks in database</p>
             </div>
           </div>
         </div>
 
-        {% if pending > 0 %}
-        <div class="card p-3 mb-4 border-warning">
-          <h6 class="text-warning mb-3">Pending Approvals ({{ pending }})</h6>
-          <table class="table table-sm mb-0">
-            <thead class="table-light"><tr><th>Username</th><th>Email</th><th>Action</th></tr></thead>
-            <tbody>
-            {% for u in users if not u['approved'] %}
-              <tr>
-                <td>{{ u['username'] }}</td>
-                <td>{{ u['email'] }}</td>
-                <td><a href="/approve/{{ u['id'] }}" class="btn btn-sm btn-success">Approve</a></td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
+        <div class="card p-3 shadow-sm border-0">
+          <!-- Search + Tabs Header -->
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-primary fw-bold user-tab active" data-tab="pending" onclick="switchTab('pending')">
+                Pending <span class="badge bg-warning text-dark ms-1">{{ pending }}</span>
+              </button>
+              <button class="btn btn-sm btn-outline-secondary fw-bold user-tab" data-tab="approved" onclick="switchTab('approved')">
+                Approved <span class="badge bg-success ms-1">{{ approved }}</span>
+              </button>
+              <button class="btn btn-sm btn-outline-secondary fw-bold user-tab" data-tab="all" onclick="switchTab('all')">
+                All Users <span class="badge bg-dark ms-1">{{ total }}</span>
+              </button>
+            </div>
+            <div style="width:260px;">
+              <input type="text" id="userSearch" class="form-control form-control-sm" placeholder="Search by name or email..." oninput="filterAndPaginate()">
+            </div>
+          </div>
 
-        <div class="card p-3">
-          <h6 class="mb-3">All Users</h6>
-          <table class="table table-hover table-sm mb-0">
-            <thead class="table-dark">
-              <tr><th>Username</th><th>Email</th><th>Status</th><th>Quiz</th><th>Score</th><th>Logins</th><th>Last Login</th><th>Action</th></tr>
-            </thead>
-            <tbody>
-            {% for u in users %}
-              <tr>
-                <td><b>{{ u['username'] }}</b></td>
-                <td>{{ u['email'] }}</td>
-                <td>
-                  {% if u['approved'] %}<span class="badge bg-success badge-status">Approved</span>
-                  {% else %}<span class="badge bg-warning text-dark badge-status">Pending</span>{% endif %}
-                </td>
-                <td>
-                  {% if u['quiz_status'] == 'completed' %}<span class="badge bg-success badge-status">Completed</span>
-                  {% elif u['quiz_status'] == 'in_progress' %}<span class="badge bg-info badge-status">In Progress</span>
-                  {% else %}<span class="badge bg-secondary badge-status">Not Started</span>{% endif %}
-                </td>
-                <td>{{ u['quiz_score'] or '-' }}</td>
-                <td>{{ u['login_count'] or 0 }}</td>
-                <td style="font-size:.8rem;">{{ u['last_login'] or 'Never' }}</td>
-                <td>
-                  {% if not u['approved'] %}
-                    <a href="/approve/{{ u['id'] }}" class="btn btn-sm btn-success">Approve</a>
-                  {% else %}
-                    <a href="/revoke/{{ u['id'] }}" class="btn btn-sm btn-outline-danger">Revoke</a>
-                  {% endif %}
-                </td>
-              </tr>
-            {% else %}
-              <tr><td colspan="8" class="text-center text-muted">No users registered yet.</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
+          <!-- Pending Tab (with bulk approve) -->
+          <form method="post" action="/admin/bulk_approve" id="tab-pending">
+            <table class="table table-hover table-sm mb-2" id="pending-table">
+              <thead class="table-warning">
+                <tr>
+                  <th style="width:30px;"><input type="checkbox" id="selectAll" onclick="document.querySelectorAll('.bulk-chk:not([style*=display])').forEach(c=>c.checked=this.checked)"></th>
+                  <th>Username</th><th>Email</th><th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for u in users if not u['approved'] %}
+                <tr class="user-row" data-name="{{ u['username']|lower }}" data-email="{{ u['email']|lower }}" data-status="pending">
+                  <td><input type="checkbox" name="user_ids" value="{{ u['id'] }}" class="bulk-chk"></td>
+                  <td><b>{{ u['username'] }}</b></td>
+                  <td>{{ u['email'] }}</td>
+                  <td><a href="/approve/{{ u['id'] }}" class="btn btn-sm btn-success py-0 px-2">Approve</a></td>
+                </tr>
+              {% else %}
+                <tr class="empty-msg"><td colspan="4" class="text-center text-muted py-4">No pending approvals 🎉</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+            {% if pending > 0 %}
+            <div class="d-flex justify-content-between align-items-center">
+              <button type="submit" class="btn btn-warning btn-sm fw-bold px-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1"><path d="M12.354 4.354a.5.5 0 0 0-.708-.708L5 10.293 2.354 7.646a.5.5 0 1 0-.708.708l3 3a.5.5 0 0 0 .708 0l7-7z"/></svg>
+                Approve Selected
+              </button>
+              <div id="pagination-pending" class="d-flex align-items-center gap-2"></div>
+            </div>
+            {% endif %}
+          </form>
+
+          <!-- Approved Tab -->
+          <div id="tab-approved" class="d-none">
+            <table class="table table-hover table-sm mb-2" id="approved-table">
+              <thead class="table-dark">
+                <tr><th>Username</th><th>Email</th><th>Quiz</th><th>Score</th><th>Logins</th><th>Last Login</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+              {% for u in users if u['approved'] %}
+                <tr class="user-row" data-name="{{ u['username']|lower }}" data-email="{{ u['email']|lower }}" data-status="approved">
+                  <td><b>{{ u['username'] }}</b></td>
+                  <td>{{ u['email'] }}</td>
+                  <td>
+                    {% if u['quiz_status'] == 'completed' %}<span class="badge bg-success badge-status">Completed</span>
+                    {% elif u['quiz_status'] == 'in_progress' %}<span class="badge bg-info badge-status">In Progress</span>
+                    {% else %}<span class="badge bg-secondary badge-status">Not Started</span>{% endif %}
+                  </td>
+                  <td>{{ u['quiz_score'] or '-' }}</td>
+                  <td>{{ u['login_count'] or 0 }}</td>
+                  <td style="font-size:.78rem;">{{ u['last_login'] or 'Never' }}</td>
+                  <td><a href="/revoke/{{ u['id'] }}" class="btn btn-sm btn-outline-danger py-0 px-2">Revoke</a></td>
+                </tr>
+              {% else %}
+                <tr class="empty-msg"><td colspan="7" class="text-center text-muted py-4">No approved users yet.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+            <div id="pagination-approved" class="d-flex justify-content-end align-items-center gap-2"></div>
+          </div>
+
+          <!-- All Users Tab -->
+          <div id="tab-all" class="d-none">
+            <table class="table table-hover table-sm mb-2" id="all-table">
+              <thead class="table-dark">
+                <tr><th>Username</th><th>Email</th><th>Status</th><th>Quiz</th><th>Score</th><th>Logins</th><th>Last Login</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+              {% for u in users %}
+                <tr class="user-row" data-name="{{ u['username']|lower }}" data-email="{{ u['email']|lower }}" data-status="all">
+                  <td><b>{{ u['username'] }}</b></td>
+                  <td>{{ u['email'] }}</td>
+                  <td>
+                    {% if u['approved'] %}<span class="badge bg-success badge-status">Approved</span>
+                    {% else %}<span class="badge bg-warning text-dark badge-status">Pending</span>{% endif %}
+                  </td>
+                  <td>
+                    {% if u['quiz_status'] == 'completed' %}<span class="badge bg-success badge-status">Completed</span>
+                    {% elif u['quiz_status'] == 'in_progress' %}<span class="badge bg-info badge-status">In Progress</span>
+                    {% else %}<span class="badge bg-secondary badge-status">Not Started</span>{% endif %}
+                  </td>
+                  <td>{{ u['quiz_score'] or '-' }}</td>
+                  <td>{{ u['login_count'] or 0 }}</td>
+                  <td style="font-size:.78rem;">{{ u['last_login'] or 'Never' }}</td>
+                  <td>
+                    {% if not u['approved'] %}
+                      <a href="/approve/{{ u['id'] }}" class="btn btn-sm btn-success py-0 px-2">Approve</a>
+                    {% else %}
+                      <a href="/revoke/{{ u['id'] }}" class="btn btn-sm btn-outline-danger py-0 px-2">Revoke</a>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr class="empty-msg"><td colspan="8" class="text-center text-muted py-4">No users registered yet.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+            <div id="pagination-all" class="d-flex justify-content-end align-items-center gap-2"></div>
+          </div>
         </div>
+
+        <script>
+          const PER_PAGE = 10;
+          let currentTab = 'pending';
+          let currentPages = { pending: 1, approved: 1, all: 1 };
+
+          function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.user-tab').forEach(b => {
+              b.classList.remove('btn-primary', 'active');
+              b.classList.add('btn-outline-secondary');
+            });
+            const btn = document.querySelector(`.user-tab[data-tab="${tab}"]`);
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-primary', 'active');
+
+            document.getElementById('tab-pending').classList.toggle('d-none', tab !== 'pending');
+            document.getElementById('tab-approved').classList.toggle('d-none', tab !== 'approved');
+            document.getElementById('tab-all').classList.toggle('d-none', tab !== 'all');
+
+            filterAndPaginate();
+          }
+
+          function filterAndPaginate() {
+            const query = document.getElementById('userSearch').value.toLowerCase().trim();
+            const tabId = currentTab === 'pending' ? 'pending-table' : (currentTab === 'approved' ? 'approved-table' : 'all-table');
+            const rows = Array.from(document.querySelectorAll(`#${tabId} tbody .user-row`));
+
+            // Filter
+            let visible = [];
+            rows.forEach(row => {
+              const name = row.dataset.name || '';
+              const email = row.dataset.email || '';
+              const match = !query || name.includes(query) || email.includes(query);
+              if (match) {
+                visible.push(row);
+              }
+              row.style.display = 'none';
+            });
+
+            // Paginate
+            const totalPages = Math.max(1, Math.ceil(visible.length / PER_PAGE));
+            if (currentPages[currentTab] > totalPages) currentPages[currentTab] = 1;
+            const page = currentPages[currentTab];
+            const start = (page - 1) * PER_PAGE;
+            const end = start + PER_PAGE;
+
+            visible.forEach((row, i) => {
+              row.style.display = (i >= start && i < end) ? '' : 'none';
+            });
+
+            // Show empty message if no results
+            const emptyMsg = document.querySelector(`#${tabId} tbody .empty-msg`);
+            if (emptyMsg) emptyMsg.style.display = visible.length === 0 ? '' : 'none';
+
+            // Render pagination controls
+            const pagDiv = document.getElementById(`pagination-${currentTab}`);
+            if (visible.length <= PER_PAGE) {
+              pagDiv.innerHTML = `<small class="text-muted">${visible.length} user${visible.length !== 1 ? 's' : ''}</small>`;
+              return;
+            }
+
+            let html = `<small class="text-muted me-2">Page ${page}/${totalPages} (${visible.length} users)</small>`;
+            html += `<button class="btn btn-sm btn-outline-secondary" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">‹ Prev</button>`;
+            
+            // Show page numbers (max 5)
+            let pStart = Math.max(1, page - 2);
+            let pEnd = Math.min(totalPages, pStart + 4);
+            if (pEnd - pStart < 4) pStart = Math.max(1, pEnd - 4);
+            
+            for (let p = pStart; p <= pEnd; p++) {
+              html += `<button class="btn btn-sm ${p === page ? 'btn-primary' : 'btn-outline-secondary'}" onclick="goPage(${p})">${p}</button>`;
+            }
+            
+            html += `<button class="btn btn-sm btn-outline-secondary" ${page >= totalPages ? 'disabled' : ''} onclick="goPage(${page + 1})">Next ›</button>`;
+            pagDiv.innerHTML = html;
+          }
+
+          function goPage(p) {
+            currentPages[currentTab] = p;
+            filterAndPaginate();
+          }
+
+          // Initialize
+          filterAndPaginate();
+        </script>
       </div>
     </div>
     """,
@@ -233,7 +368,12 @@ def admin():
     completed=completed, inprogress=inprogress, not_started=not_started,
     total_logins=total_logins,
     mcq_count=mcq_count, mcq_total=mcq_total,
-    coding_count=coding_count, coding_total=coding_total)
+    coding_count=coding_count, coding_total=coding_total,
+    quizzes=quizzes,
+    active='dashboard')
+
+
+
 
 
 @admin_bp.route('/admin/users')
@@ -252,7 +392,26 @@ def approve(uid):
         conn.execute("UPDATE users SET approved=1 WHERE id=?", (uid,))
         conn.commit()
     if user:
-        send_approval_email(user['email'], user['username'])
+        send_approval_email(user['email'], user['username'], request.host_url)
+    return redirect('/admin')
+
+
+@admin_bp.route('/admin/bulk_approve', methods=['POST'])
+def bulk_approve():
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    user_ids = request.form.getlist('user_ids')
+    if user_ids:
+        with get_db() as conn:
+            placeholders = ','.join('?' for _ in user_ids)
+            conn.execute(f"UPDATE users SET approved=1 WHERE id IN ({placeholders})", user_ids)
+            users_to_email = conn.execute(f"SELECT email, username FROM users WHERE id IN ({placeholders})", user_ids).fetchall()
+            conn.commit()
+            
+        for u in users_to_email:
+            send_approval_email(u['email'], u['username'], request.host_url)
+            
     return redirect('/admin')
 
 
@@ -271,7 +430,7 @@ def approve_token(token):
         conn.execute("UPDATE users SET approved=1, token=NULL WHERE token=?", (token,))
         conn.commit()
 
-    send_approval_email(user['email'], user['username'])
+    send_approval_email(user['email'], user['username'], request.host_url)
 
     return render_template_string(CSS + """
     <div class="container mt-5 d-flex justify-content-center">
@@ -294,597 +453,904 @@ def revoke(uid):
     return redirect('/admin')
 
 
-@admin_bp.route('/admin/add_mcq', methods=['GET', 'POST'])
-def add_mcq():
+@admin_bp.route('/admin/analytics')
+def admin_analytics():
     if session.get('role') != 'admin':
         return redirect('/login')
-
-    msg = ""
-    new_ids = []
-
-    if request.method == 'POST':
-        action = request.form.get('action', 'manual')
-
-        if action == 'manual':
-            with get_db() as conn:
-                conn.execute(
-                    "INSERT INTO questions(question,a,b,c,d,answer,published) VALUES(?,?,?,?,?,?,0)",
-                    (request.form['q'], request.form['a'], request.form['b'],
-                     request.form['c'], request.form['d'], request.form['ans'])
-                )
-                conn.commit()
-            msg = "saved"
-
-        elif action == 'upload_csv':
-            f = request.files.get('csvfile')
-            if f and f.filename:
-                ext     = f.filename.rsplit('.', 1)[-1].lower()
-                content = f.read().decode('utf-8', errors='ignore')
-                imported = 0
-                errors   = []
-                try:
-                    rows = json.loads(content) if ext == 'json' else list(csv.DictReader(io.StringIO(content)))
-                    with get_db() as conn:
-                        for i, raw in enumerate(rows):
-                            r   = normalize_row(raw)
-                            q   = find_col(r, 'question', 'q', 'ques')
-                            oa  = find_col(r, 'a', 'option_a', 'option_a', 'opt_a', 'opt1', 'option1', 'choice_a', 'choice1')
-                            ob  = find_col(r, 'b', 'option_b', 'option_b', 'opt_b', 'opt2', 'option2', 'choice_b', 'choice2')
-                            oc  = find_col(r, 'c', 'option_c', 'option_c', 'opt_c', 'opt3', 'option3', 'choice_c', 'choice3')
-                            od  = find_col(r, 'd', 'option_d', 'option_d', 'opt_d', 'opt4', 'option4', 'choice_d', 'choice4')
-                            ans = find_col(r, 'answer', 'correct', 'correct_answer', 'ans', 'correct_option')
-                            if not q:
-                                errors.append(f"Row {i+1}: missing question"); continue
-                            try:
-                                cur = conn.execute(
-                                    "INSERT INTO questions(question,a,b,c,d,answer,published) VALUES(?,?,?,?,?,?,0)",
-                                    (q, oa, ob, oc, od, ans.lower())
-                                )
-                                new_ids.append(cur.lastrowid)
-                                imported += 1
-                            except Exception as e:
-                                errors.append(f"Row {i+1}: {e}")
-                        conn.commit()
-                    msg = f"csv_ok:{imported}:{';'.join(errors)}"
-                except Exception as e:
-                    msg = f"csv_err:{e}"
-
-        elif action == 'publish_sel':
-            ids = request.form.getlist('pub_ids')
-            with get_db() as conn:
-                for qid in ids:
-                    conn.execute("UPDATE questions SET published=1 WHERE id=?", (qid,))
-                conn.commit()
-            msg = f"published:{len(ids)}"
-
+        
     conn = get_db()
-    try:
-        questions = conn.execute("SELECT * FROM questions ORDER BY id DESC").fetchall()
-    except Exception:
-        questions = []
+    current_year = datetime.now().year
+    
+    # Monthly Logins for current year
+    monthly_data = conn.execute("""
+        SELECT strftime('%m', login_date) as month, COUNT(*) as count
+        FROM login_history
+        WHERE strftime('%Y', login_date) = ?
+        GROUP BY month
+        ORDER BY month ASC
+    """, (str(current_year),)).fetchall()
+    
+    # Convert month numbers to names
+    month_names = {
+        '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+        '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+        '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+    }
+    
+    stats = []
+    total_this_year = 0
+    for row in monthly_data:
+        m_name = month_names.get(row['month'], row['month'])
+        stats.append({'name': m_name, 'count': row['count']})
+        total_this_year += row['count']
+        
+    # Simple prediction logic: 
+    # Average logins per month * 12 for next year + 15% estimated growth
+    avg_per_month = total_this_year / len(stats) if stats else 0
+    predicted_next_year = int((avg_per_month * 12) * 1.15)
+    
+    # Lifetime stats from old data
+    total_lifetime_logins = conn.execute("SELECT SUM(login_count) FROM users").fetchone()[0] or 0
+    total_users = conn.execute("SELECT COUNT(*) FROM users WHERE role='user'").fetchone()[0]
+    
     conn.close()
-    new_ids_set       = set(new_ids)
-    published_count   = sum(1 for q in questions if q['published'])
-    unpublished_count = len(questions) - published_count
-
+    
     return render_template_string(CSS + SIDEBAR + """
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <h5 class="mb-0">MCQ Questions</h5>
+      <h4 class="mb-0">User Analytics & Insights</h4>
       <div class="d-flex gap-2">
-        <span class="badge bg-success fs-6 px-3">{{ published_count }} Published</span>
-        <span class="badge bg-secondary fs-6 px-3">{{ unpublished_count }} Draft</span>
-        <a href="/admin/publish_all/mcq" class="btn btn-success btn-sm">Publish All</a>
-        <a href="/admin/unpublish_all/mcq" class="btn btn-outline-secondary btn-sm">Unpublish All</a>
+        <div class="badge bg-dark px-3 py-2">Total Historical Logins: {{ lifetime }}</div>
+        <div class="badge bg-primary px-3 py-2">Year: {{ year }}</div>
       </div>
     </div>
 
-    {% if msg == 'saved' %}
-    <div class="alert alert-success alert-dismissible">Question saved! <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-    {% elif msg and msg.startswith('csv_ok') %}
-      {% set parts = msg.split(':') %}
-      <div class="alert alert-success alert-dismissible">
-        <b>{{ parts[1] }} questions imported from CSV!</b>
-        {% if parts[2] %}<br><small>{{ parts[2] }}</small>{% endif %}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      </div>
-    {% elif msg and msg.startswith('csv_err') %}
-      <div class="alert alert-danger">Upload error: {{ msg.split(':',1)[1] }}</div>
-    {% elif msg and msg.startswith('published') %}
-      <div class="alert alert-success alert-dismissible">{{ msg.split(':')[1] }} questions published! <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-    {% endif %}
+    <div class="row g-4 mb-4">
+       <div class="col-md-4">
+          <div class="card p-3 shadow-sm border-0 bg-white">
+             <small class="text-muted fw-bold">TOTAL REGISTERED USERS</small>
+             <h3 class="mb-0">{{ total_u }}</h3>
+          </div>
+       </div>
+       <div class="col-md-4">
+          <div class="card p-3 shadow-sm border-0 bg-white text-primary">
+             <small class="text-muted fw-bold">TOTAL LOGINS (LIFETIME)</small>
+             <h3 class="mb-0">{{ lifetime }}</h3>
+          </div>
+       </div>
+       <div class="col-md-4">
+          <div class="card p-3 shadow-sm border-0 bg-white text-success">
+             <small class="text-muted fw-bold">CURRENT YEAR LOGINS</small>
+             <h3 class="mb-0">{{ total_this_year }}</h3>
+          </div>
+       </div>
+    </div>
 
-    <div class="row g-4">
-      <div class="col-md-4">
-        <div class="card p-4 mb-3">
-          <h6 class="mb-3">Add New MCQ</h6>
-          <form method="post">
-            <input type="hidden" name="action" value="manual">
-            <textarea name="q" class="form-control mb-2" rows="2" placeholder="Question" required></textarea>
-            <input name="a" class="form-control mb-2" placeholder="Option A" required>
-            <input name="b" class="form-control mb-2" placeholder="Option B" required>
-            <input name="c" class="form-control mb-2" placeholder="Option C" required>
-            <input name="d" class="form-control mb-2" placeholder="Option D" required>
-            <label class="form-label mt-1">Correct Answer</label>
-            <select name="ans" class="form-select mb-3">
-              <option value="a">A</option><option value="b">B</option>
-              <option value="c">C</option><option value="d">D</option>
-            </select>
-            <button class="btn btn-primary w-100">Save Question</button>
-          </form>
-        </div>
-        <div class="card p-4">
-          <h6 class="mb-2">Upload CSV / JSON</h6>
-          <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="upload_csv">
-            <div style="border:2px dashed #0d6efd;border-radius:8px;padding:16px;text-align:center;cursor:pointer;background:#f8f9ff;"
-                 onclick="document.getElementById('mcq_csv').click()">
-              <div style="font-size:1.5rem;">📄</div>
-              <p class="mb-0 fw-semibold" style="font-size:.9rem;">Click to select CSV / JSON</p>
-              <input id="mcq_csv" type="file" name="csvfile" accept=".csv,.json" hidden
-                     onchange="document.getElementById('mcq_fn').innerText=this.files[0].name">
-            </div>
-            <p id="mcq_fn" class="text-muted text-center mt-1 mb-2" style="font-size:.8rem;">No file chosen</p>
-            <button class="btn btn-outline-primary w-100">Import File</button>
-          </form>
-          <div class="mt-2 p-2 bg-light rounded" style="font-size:.75rem;">
-            <b>Accepted columns:</b><br>
-            <code>question, a/opt1, b/opt2, c/opt3, d/opt4, answer</code>
+    <div class="row g-4 mb-5">
+      <div class="col-md-6">
+        <div class="card h-100 shadow-sm border-0 p-4">
+          <h6 class="text-muted fw-bold mb-4">LOGINS BY MONTH ({{ year }})</h6>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-light">
+                <tr><th>Month</th><th>Login Count</th><th style="width:150px;">Trend</th></tr>
+              </thead>
+              <tbody>
+                {% for s in stats %}
+                <tr>
+                  <td><b>{{ s.name }}</b></td>
+                  <td><span class="badge bg-info text-dark px-3">{{ s.count }}</span></td>
+                  <td>
+                    <div class="progress" style="height:8px;">
+                      <div class="progress-bar bg-success" style="width: {{ (s.count/max_count*100) if max_count > 0 else 0 }}%"></div>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-center py-4 text-muted">No login data recorded for this year yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
-
-      <div class="col-md-8">
-        <div class="card p-3">
-          <h6 class="mb-3">All MCQ Questions ({{ questions|length }})</h6>
-          <div style="max-height:580px;overflow-y:auto;">
-          <table class="table table-sm table-hover align-middle">
-            <thead class="table-dark sticky-top">
-              <tr><th>#</th><th>Question</th><th>Ans</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-            {% for q in questions %}
-            <tr class="{{ 'table-warning border-start border-warning border-3' if q['id'] in new_ids_set else ('table-success' if q['published'] else '') }}">
-              <td>{{ q['id'] }}</td>
-              <td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ q['question'] }}">
-                {% if q['id'] in new_ids_set %}<span class="badge bg-warning text-dark me-1">New</span>{% endif %}
-                {{ q['question'] }}
-              </td>
-              <td><span class="badge bg-primary">{{ q['answer']|upper }}</span></td>
-              <td>
-                {% if q['published'] %}<span class="badge bg-success">Published</span>
-                {% else %}<span class="badge bg-secondary">Draft</span>{% endif %}
-              </td>
-              <td>
-                <div class="d-flex gap-1">
-                  {% if q['published'] %}
-                    <a href="/admin/unpublish/mcq/{{ q['id'] }}" class="btn btn-sm btn-warning">Unpublish</a>
-                  {% else %}
-                    <a href="/admin/publish/mcq/{{ q['id'] }}" class="btn btn-sm btn-success">Publish</a>
-                  {% endif %}
-                  <a href="/admin/delete_mcq/{{ q['id'] }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete?')">Delete</a>
-                </div>
-              </td>
-            </tr>
-            {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-3">No questions yet.</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
+      
+      <div class="col-md-6">
+        <div class="card h-100 shadow-sm border-0 p-4 bg-dark text-white">
+          <h6 class="text-white-50 fw-bold mb-4">FUTURE PREDICTIONS</h6>
+          <div class="mb-5">
+            <h1 class="display-4 fw-bold text-success">{{ predicted }}</h1>
+            <p class="text-white-50">Estimated Logins for {{ year + 1 }}</p>
+            <hr class="border-secondary">
+            <small class="text-white-50">
+              * Based on current monthly average ({{ avg|int }} logins/mo) with a 15% projected growth in user engagement.
+            </small>
+          </div>
+          
+          <div class="alert alert-info bg-opacity-10 border-info text-info small">
+             <strong>Idea:</strong> To increase next year's numbers, consider sending automated email reminders to users who haven't logged in for 30 days.
           </div>
         </div>
       </div>
     </div>
-  </div>
-</div>
-    """, msg=msg, questions=questions, active='mcq',
-    published_count=published_count, unpublished_count=unpublished_count,
-    new_ids_set=new_ids_set)
+
+    <div class="card shadow-sm border-0 p-4">
+       <h6 class="text-muted fw-bold mb-3">DATA INTEGRITY NOTICE</h6>
+       <p class="small text-muted mb-0">
+          Historical data before today is not available because tracking was just enabled. 
+          The system will now record every login event to build accurate monthly reports going forward.
+       </p>
+    </div>
+    """, year=current_year, stats=stats, 
+       max_count=max([s['count'] for s in stats]) if stats else 0,
+       predicted=predicted_next_year, avg=avg_per_month, 
+       lifetime=total_lifetime_logins, total_u=total_users, 
+       total_this_year=total_this_year,
+       active='analytics')
 
 
-@admin_bp.route('/admin/add_coding', methods=['GET', 'POST'])
-def add_coding():
+@admin_bp.route('/admin/quizzes')
+def admin_quizzes():
     if session.get('role') != 'admin':
         return redirect('/login')
-
-    msg     = ""
-    new_ids = []
-
-    if request.method == 'POST':
-        action = request.form.get('action', 'manual')
-
-        if action == 'manual':
-            with get_db() as conn:
-                conn.execute(
-                    "INSERT INTO coding_questions(question,sample_input,sample_output,published) VALUES(?,?,?,0)",
-                    (request.form['q'], request.form['si'], request.form['so'])
-                )
-                conn.commit()
-            msg = "saved"
-
-        elif action == 'upload_csv':
-            f = request.files.get('csvfile')
-            if f and f.filename:
-                ext     = f.filename.rsplit('.', 1)[-1].lower()
-                content = f.read().decode('utf-8', errors='ignore')
-                imported = 0
-                errors   = []
-                try:
-                    rows = json.loads(content) if ext == 'json' else list(csv.DictReader(io.StringIO(content)))
-                    with get_db() as conn:
-                        for i, raw in enumerate(rows):
-                            r  = normalize_row(raw)
-                            q  = find_col(r, 'question', 'q', 'ques')
-                            si = find_col(r, 'sample_input', 'input', 'sample_input', 'sampleinput')
-                            so = find_col(r, 'sample_output', 'output', 'sample_output', 'sampleoutput')
-                            if not q:
-                                errors.append(f"Row {i+1}: missing question"); continue
-                            try:
-                                cur = conn.execute(
-                                    "INSERT INTO coding_questions(question,sample_input,sample_output,published) VALUES(?,?,?,0)",
-                                    (q, si, so)
-                                )
-                                new_ids.append(cur.lastrowid)
-                                imported += 1
-                            except Exception as e:
-                                errors.append(f"Row {i+1}: {e}")
-                        conn.commit()
-                    msg = f"csv_ok:{imported}:{';'.join(errors)}"
-                except Exception as e:
-                    msg = f"csv_err:{e}"
-
     conn = get_db()
-    try:
-        questions = conn.execute("SELECT * FROM coding_questions ORDER BY id DESC").fetchall()
-    except Exception:
-        questions = []
+    quizzes = conn.execute("""
+        SELECT q.*, c.name as cat_name, c.type as cat_type,
+        (SELECT COUNT(*) FROM quiz_topics WHERE quiz_id = q.id) + 
+        (SELECT COUNT(*) FROM quiz_manual_questions WHERE quiz_id = q.id) as q_count
+        FROM quizzes q
+        JOIN categories c ON q.category_id = c.id
+        ORDER BY q.id DESC
+    """).fetchall()
     conn.close()
-
-    published_count   = sum(1 for q in questions if q['published'])
-    unpublished_count = len(questions) - published_count
-    new_ids_set = set(new_ids)
-
     return render_template_string(CSS + SIDEBAR + """
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <h5 class="mb-0">Coding Questions</h5>
-      <div class="d-flex gap-2">
-        <span class="badge bg-success fs-6 px-3">{{ published_count }} Published</span>
-        <span class="badge bg-secondary fs-6 px-3">{{ unpublished_count }} Draft</span>
-        <a href="/admin/publish_all/coding" class="btn btn-success btn-sm">Publish All</a>
-        <a href="/admin/unpublish_all/coding" class="btn btn-outline-secondary btn-sm">Unpublish All</a>
-      </div>
+      <h4 class="mb-0">Manage Quizzes</h4>
+      <a href="/admin/quiz/create" class="btn btn-primary">+ Create New Quiz</a>
     </div>
-
-    {% if msg == 'saved' %}
-    <div class="alert alert-success alert-dismissible">Question saved! <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
-    {% elif msg and msg.startswith('csv_ok') %}
-      {% set parts = msg.split(':') %}
-      <div class="alert alert-success alert-dismissible">
-        <b>{{ parts[1] }} questions imported!</b>
-        {% if parts[2] %}<br><small>{{ parts[2] }}</small>{% endif %}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      </div>
-    {% elif msg and msg.startswith('csv_err') %}
-      <div class="alert alert-danger">Upload error: {{ msg.split(':',1)[1] }}</div>
-    {% endif %}
-
-    <div class="row g-4">
-      <div class="col-md-4">
-        <div class="card p-4 mb-3">
-          <h6 class="mb-3">Add New Coding Question</h6>
-          <form method="post">
-            <input type="hidden" name="action" value="manual">
-            <textarea name="q"  class="form-control mb-2" rows="4" placeholder="Question description" required></textarea>
-            <input   name="si" class="form-control mb-2" placeholder="Sample Input">
-            <input   name="so" class="form-control mb-3" placeholder="Sample Output">
-            <button class="btn btn-success w-100">Save Question</button>
-          </form>
-        </div>
-        <div class="card p-4">
-          <h6 class="mb-2">Upload CSV / JSON</h6>
-          <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="upload_csv">
-            <div style="border:2px dashed #198754;border-radius:8px;padding:16px;text-align:center;cursor:pointer;background:#f8fff9;"
-                 onclick="document.getElementById('cod_csv').click()">
-              <div style="font-size:1.5rem;">💻</div>
-              <p class="mb-0 fw-semibold" style="font-size:.9rem;">Click to select CSV / JSON</p>
-              <input id="cod_csv" type="file" name="csvfile" accept=".csv,.json" hidden
-                     onchange="document.getElementById('cod_fn').innerText=this.files[0].name">
-            </div>
-            <p id="cod_fn" class="text-muted text-center mt-1 mb-2" style="font-size:.8rem;">No file chosen</p>
-            <button class="btn btn-outline-success w-100">Import File</button>
-          </form>
-          <div class="mt-2 p-2 bg-light rounded" style="font-size:.75rem;">
-            <b>Accepted columns:</b><br>
-            <code>question, sample_input, sample_output</code>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-8">
-        <div class="card p-3">
-          <h6 class="mb-3">All Coding Questions ({{ questions|length }})</h6>
-          <div style="max-height:580px;overflow-y:auto;">
-          <table class="table table-sm table-hover align-middle">
-            <thead class="table-dark sticky-top">
-              <tr><th>#</th><th>Question</th><th>Input</th><th>Output</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-            {% for q in questions %}
-            <tr class="{{ 'table-warning' if q['id'] in new_ids_set else ('table-success' if q['published'] else '') }}">
-              <td>{{ q['id'] }}</td>
-              <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ q['question'] }}">
-                {% if q['id'] in new_ids_set %}<span class="badge bg-warning text-dark me-1">New</span>{% endif %}
-                {{ q['question'] }}
-              </td>
-              <td>{{ q['sample_input'] }}</td>
-              <td>{{ q['sample_output'] }}</td>
-              <td>
-                {% if q['published'] %}<span class="badge bg-success">Published</span>
-                {% else %}<span class="badge bg-secondary">Draft</span>{% endif %}
-              </td>
-              <td>
-                <div class="d-flex gap-1">
-                  {% if q['published'] %}
-                    <a href="/admin/unpublish/coding/{{ q['id'] }}" class="btn btn-sm btn-warning">Unpublish</a>
-                  {% else %}
-                    <a href="/admin/publish/coding/{{ q['id'] }}" class="btn btn-sm btn-success">Publish</a>
-                  {% endif %}
-                  <a href="/admin/delete_coding/{{ q['id'] }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete?')">Delete</a>
-                </div>
-              </td>
-            </tr>
-            {% else %}
-            <tr><td colspan="6" class="text-center text-muted py-3">No questions yet.</td></tr>
-            {% endfor %}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-    """, msg=msg, questions=questions, active='coding',
-    published_count=published_count, unpublished_count=unpublished_count,
-    new_ids_set=new_ids_set)
-
-
-@admin_bp.route('/admin/upload', methods=['GET', 'POST'])
-def upload_questions():
-    if session.get('role') != 'admin':
-        return redirect('/login')
-
-    result       = None
-    new_ids      = []
-    import_qtype = None
-
-    if request.method == 'POST':
-        action = request.form.get('action', 'import')
-
-        if action in ('publish_imported', 'unpublish_imported'):
-            ids   = request.form.getlist('qids')
-            qtype = request.form.get('qtype_imported', 'mcq')
-            table = 'questions' if qtype == 'mcq' else 'coding_questions'
-            val   = 1 if action == 'publish_imported' else 0
-            with get_db() as conn:
-                for qid in ids:
-                    conn.execute(f"UPDATE {table} SET published=? WHERE id=?", (val, qid))
-                conn.commit()
-            label  = 'Published' if val else 'Unpublished'
-            result = {'status': 'success', 'imported': len(ids), 'errors': [],
-                      'qtype': qtype, 'msg': f'{label} {len(ids)} questions.', 'action': label}
-        else:
-            qtype = request.form.get('qtype')
-            f     = request.files.get('file')
-
-            if not f or not f.filename:
-                result = {'status': 'error', 'msg': 'No file selected.'}
-            else:
-                ext     = f.filename.rsplit('.', 1)[-1].lower()
-                content = f.read().decode('utf-8', errors='ignore')
-                imported = 0
-                errors   = []
-
-                try:
-                    rows = []
-                    if ext == 'json':
-                        data = json.loads(content)
-                        rows = data if isinstance(data, list) else [data]
-                    elif ext == 'csv':
-                        rows = list(csv.DictReader(io.StringIO(content)))
-                    else:
-                        result = {'status': 'error', 'msg': 'Only CSV or JSON files supported.'}
-
-                    if rows and not result:
-                        with get_db() as conn:
-                            if qtype == 'mcq':
-                                for i, raw in enumerate(rows):
-                                    r = normalize_row(raw)
-                                    try:
-                                        q   = find_col(r, 'question', 'q', 'ques')
-                                        oa  = find_col(r, 'a', 'option_a', 'opt_a', 'opt1', 'option1', 'choice_a', 'choice1')
-                                        ob  = find_col(r, 'b', 'option_b', 'opt_b', 'opt2', 'option2', 'choice_b', 'choice2')
-                                        oc  = find_col(r, 'c', 'option_c', 'opt_c', 'opt3', 'option3', 'choice_c', 'choice3')
-                                        od  = find_col(r, 'd', 'option_d', 'opt_d', 'opt4', 'option4', 'choice_d', 'choice4')
-                                        ans = find_col(r, 'answer', 'correct', 'correct_answer', 'ans', 'correct_option')
-                                        if not q:
-                                            errors.append(f"Row {i+1}: missing question text"); continue
-                                        cur = conn.execute(
-                                            "INSERT INTO questions(question,a,b,c,d,answer,published) VALUES(?,?,?,?,?,?,0)",
-                                            (q, oa, ob, oc, od, ans.lower())
-                                        )
-                                        new_ids.append(cur.lastrowid)
-                                        imported += 1
-                                    except Exception as e:
-                                        errors.append(f"Row {i+1}: {e}")
-                            else:
-                                for i, raw in enumerate(rows):
-                                    r = normalize_row(raw)
-                                    try:
-                                        q  = find_col(r, 'question', 'q', 'ques')
-                                        si = find_col(r, 'sample_input', 'input', 'sample_input')
-                                        so = find_col(r, 'sample_output', 'output', 'sample_output')
-                                        if not q:
-                                            errors.append(f"Row {i+1}: missing question text"); continue
-                                        cur = conn.execute(
-                                            "INSERT INTO coding_questions(question,sample_input,sample_output,published) VALUES(?,?,?,0)",
-                                            (q, si, so)
-                                        )
-                                        new_ids.append(cur.lastrowid)
-                                        imported += 1
-                                    except Exception as e:
-                                        errors.append(f"Row {i+1}: {e}")
-                            conn.commit()
-
-                        import_qtype = qtype
-                        result = {'status': 'success', 'imported': imported,
-                                  'errors': errors, 'qtype': qtype, 'action': 'import'}
-
-                except Exception as e:
-                    result = {'status': 'error', 'msg': str(e)}
-
-    imported_questions = []
-    if new_ids and import_qtype:
-        conn = get_db()
-        table        = 'questions' if import_qtype == 'mcq' else 'coding_questions'
-        placeholders = ','.join('?' * len(new_ids))
-        imported_questions = conn.execute(
-            f"SELECT * FROM {table} WHERE id IN ({placeholders})", new_ids
-        ).fetchall()
-        conn.close()
-
-    return render_template_string(CSS + SIDEBAR + """
-    <h5 class="mb-4">Upload Questions</h5>
-
-    {% if result %}
-      {% if result.status == 'success' %}
-      <div class="alert alert-success alert-dismissible fade show">
-        <b>{{ result.imported }} {{ result.qtype|upper }} question(s)
-        {% if result.action == 'import' %}imported{% else %}{{ result.action|lower }}ed{% endif %}
-        successfully!</b>
-        {% if result.errors %}<ul class="mb-0 mt-1">{% for e in result.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-      </div>
-      {% else %}
-      <div class="alert alert-danger"><b>Error:</b> {{ result.msg }}</div>
-      {% endif %}
-    {% endif %}
-
-    {% if imported_questions %}
-    <div class="card border-success mb-4 p-3">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h6 class="mb-0 text-success">{{ imported_questions|length }} questions just imported — review &amp; publish</h6>
-        <div class="d-flex gap-2">
-          <form method="post">
-            <input type="hidden" name="action" value="publish_imported">
-            <input type="hidden" name="qtype_imported" value="{{ import_qtype }}">
-            {% for q in imported_questions %}<input type="hidden" name="qids" value="{{ q['id'] }}">{% endfor %}
-            <button class="btn btn-success btn-sm">Publish All {{ imported_questions|length }}</button>
-          </form>
-          <form method="post">
-            <input type="hidden" name="action" value="unpublish_imported">
-            <input type="hidden" name="qtype_imported" value="{{ import_qtype }}">
-            {% for q in imported_questions %}<input type="hidden" name="qids" value="{{ q['id'] }}">{% endfor %}
-            <button class="btn btn-outline-secondary btn-sm">Keep as Draft</button>
-          </form>
-        </div>
-      </div>
-      <table class="table table-sm table-hover align-middle mb-0">
+    <div class="card p-3 shadow-sm border-0">
+      <table class="table table-hover align-middle mb-0">
         <thead class="table-dark">
-          <tr>
-            <th>#</th><th>Question</th>
-            {% if import_qtype == 'mcq' %}<th>A</th><th>B</th><th>C</th><th>D</th><th>Ans</th>{% else %}<th>Input</th><th>Output</th>{% endif %}
-            <th>Status</th><th>Action</th>
-          </tr>
+          <tr><th>Quiz Name</th><th>Category</th><th>Type</th><th>Duration</th><th>Questions</th><th>Action</th></tr>
         </thead>
         <tbody>
-        {% for q in imported_questions %}
-        <tr class="{{ 'table-success' if q['published'] else '' }}">
-          <td>{{ q['id'] }}</td>
-          <td style="max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ q['question'] }}</td>
-          {% if import_qtype == 'mcq' %}
-            <td>{{ q['a'] }}</td><td>{{ q['b'] }}</td><td>{{ q['c'] }}</td><td>{{ q['d'] }}</td>
-            <td><span class="badge bg-primary">{{ q['answer']|upper }}</span></td>
-          {% else %}
-            <td>{{ q['sample_input'] }}</td><td>{{ q['sample_output'] }}</td>
-          {% endif %}
-          <td>{% if q['published'] %}<span class="badge bg-success">Published</span>{% else %}<span class="badge bg-secondary">Draft</span>{% endif %}</td>
-          <td>
-            {% if q['published'] %}
-              <a href="/admin/unpublish/{{ import_qtype }}/{{ q['id'] }}" class="btn btn-sm btn-warning">Unpublish</a>
-            {% else %}
-              <a href="/admin/publish/{{ import_qtype }}/{{ q['id'] }}" class="btn btn-sm btn-success">Publish</a>
-            {% endif %}
-          </td>
-        </tr>
+        {% for q in quizzes %}
+          <tr>
+            <td><b class="text-primary">{{ q.name }}</b></td>
+            <td>{{ q.cat_name }}</td>
+            <td><span class="badge {{ 'bg-primary' if q.cat_type == 'mcq' else ('bg-success' if q.cat_type == 'coding' else 'bg-purple') }}" {% if q.cat_type == 'mixed' %}style="background:#7c3aed;"{% endif %}>{{ q.cat_type|upper }}</span></td>
+            <td>{{ q.time_limit }} min</td>
+            <td>{{ q.q_count }}</td>
+            <td>
+              <a href="/admin/quiz/delete/{{ q.id }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this quiz permanently?')">Delete</a>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="text-center py-4 text-muted">No quizzes found. Click the button above to create one.</td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
-    {% endif %}
+    """, quizzes=quizzes, active='quizzes')
+
+
+@admin_bp.route('/admin/quiz/delete/<int:qid>')
+def delete_quiz(qid):
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    with get_db() as conn:
+        conn.execute("DELETE FROM quiz_topics WHERE quiz_id=?", (qid,))
+        conn.execute("DELETE FROM quiz_manual_questions WHERE quiz_id=?", (qid,))
+        conn.execute("DELETE FROM quizzes WHERE id=?", (qid,))
+        conn.commit()
+    return redirect('/admin/quizzes')
+
+
+@admin_bp.route('/admin/categories', methods=['GET', 'POST'])
+def categories():
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    if request.method == 'POST':
+        name = request.form.get('name')
+        ctype = request.form.get('type')
+        if name and ctype in ['mcq', 'coding', 'mixed']:
+            with get_db() as conn:
+                conn.execute("INSERT INTO categories (name, type) VALUES (?, ?)", (name, ctype))
+                conn.commit()
+            return redirect('/admin/categories')
+
+    conn = get_db()
+    categories = conn.execute("SELECT * FROM categories").fetchall()
+    conn.close()
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h4 class="mb-0">Select Category</h4>
+      <button class="btn btn-primary" onclick="document.getElementById('createCategoryForm').classList.toggle('d-none')">+ New Category</button>
+    </div>
+    
+    <div id="createCategoryForm" class="card p-3 mb-4 d-none shadow-sm border-0">
+      <form method="post" class="row g-3 align-items-end">
+        <div class="col-md-5">
+          <label class="form-label fw-bold">Category Name</label>
+          <input type="text" name="name" class="form-control" placeholder="e.g. Python Advanced" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-bold">Type</label>
+          <select name="type" class="form-select" required>
+            <option value="mcq">Multiple Choice Questions</option>
+            <option value="coding">Programming Tasks</option>
+            <option value="mixed">Mixed (MCQ + Coding)</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <button type="submit" class="btn btn-success w-100">Create</button>
+        </div>
+      </form>
+    </div>
 
     <div class="row g-4">
+      {% for cat in categories %}
       <div class="col-md-6">
-        <div class="card p-4 h-100">
-          <h6 class="mb-1">Upload MCQ Questions</h6>
-          <p class="text-muted mb-3" style="font-size:.85rem;">CSV or JSON — any column name format accepted</p>
-          <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="qtype" value="mcq">
-            <div style="border:2px dashed #0d6efd;background:#f8f9ff;border-radius:8px;padding:24px;text-align:center;cursor:pointer;"
-                 onclick="document.getElementById('mcq_file').click()">
-              <div style="font-size:2rem;">📄</div>
-              <p class="mb-1 fw-semibold">Click to select file</p>
-              <p class="text-muted mb-0" style="font-size:.8rem;">CSV or JSON only</p>
-              <input id="mcq_file" type="file" name="file" accept=".csv,.json" hidden
-                     onchange="document.getElementById('mcq_name').innerText=this.files[0].name">
+        <div class="card h-100 shadow-sm border-0 transition-transform hover-scale" 
+             style="cursor:pointer;" onclick="location.href='/admin/category/{{ cat.id }}'">
+          <div class="card-body p-4 text-center">
+            <div class="display-4 mb-3">
+              {% if cat.type == 'mcq' %}📚{% elif cat.type == 'coding' %}💻{% else %}🔀{% endif %}
             </div>
-            <p id="mcq_name" class="text-muted text-center my-2" style="font-size:.85rem;">No file chosen</p>
-            <button class="btn btn-primary w-100">Import MCQ</button>
-          </form>
-          <div class="mt-3 p-3 bg-light rounded">
-            <b style="font-size:.82rem;">CSV format:</b>
-            <code style="font-size:.75rem;display:block;margin-top:6px;white-space:pre-wrap;">question, a, b, c, d, answer</code>
+            <h5 class="card-title">{{ cat.name }}</h5>
+            <p class="text-muted">{{ 'Multiple Choice Questions' if cat.type == 'mcq' else ('Programming Tasks' if cat.type == 'coding' else 'Mixed (MCQ + Coding)') }}</p>
+            <div class="mt-3">
+               <span class="badge bg-primary px-3 py-2">Manage Topics</span>
+            </div>
           </div>
         </div>
       </div>
-      <div class="col-md-6">
-        <div class="card p-4 h-100">
-          <h6 class="mb-1">Upload Coding Questions</h6>
-          <p class="text-muted mb-3" style="font-size:.85rem;">CSV or JSON — any column name format accepted</p>
-          <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="qtype" value="coding">
-            <div style="border:2px dashed #198754;background:#f8fff9;border-radius:8px;padding:24px;text-align:center;cursor:pointer;"
-                 onclick="document.getElementById('cod_file').click()">
-              <div style="font-size:2rem;">💻</div>
-              <p class="mb-1 fw-semibold">Click to select file</p>
-              <p class="text-muted mb-0" style="font-size:.8rem;">CSV or JSON only</p>
-              <input id="cod_file" type="file" name="file" accept=".csv,.json" hidden
-                     onchange="document.getElementById('cod_name').innerText=this.files[0].name">
+      {% endfor %}
+    </div>
+    <style>
+      .hover-scale:hover { transform: scale(1.02); transition: all 0.2s; }
+    </style>
+    """, categories=categories, active='categories')
+
+
+@admin_bp.route('/admin/category/<int:cat_id>')
+def category_topics(cat_id):
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    conn = get_db()
+    category = conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
+    
+    if category['type'] == 'mixed':
+        # For mixed categories, show topics from ALL categories (both mcq and coding)
+        topics = conn.execute("SELECT t.*, c.type as src_type, c.name as src_cat FROM topics t JOIN categories c ON t.category_id = c.id WHERE c.type IN ('mcq', 'coding')").fetchall()
+    else:
+        topics = conn.execute("SELECT * FROM topics WHERE category_id=?", (cat_id,)).fetchall()
+    
+    topic_data = []
+    for t in topics:
+        if category['type'] == 'mixed':
+            src_type = t['src_type']
+        else:
+            src_type = category['type']
+        q_table = 'questions' if src_type == 'mcq' else 'coding_questions'
+        count = conn.execute(f"SELECT COUNT(*) FROM {q_table} WHERE topic_id=?", (t['id'],)).fetchone()[0]
+        topic_data.append({'id': t['id'], 'name': t['name'], 'count': count, 'src_type': src_type, 'src_cat': dict(t).get('src_cat', '')})
+    
+    conn.close()
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h4 class="mb-1">{{ category.name }} - Topics</h4>
+        <p class="text-muted small mb-0">Manage questions for each topic</p>
+      </div>
+      <a href="/admin/categories" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
+    </div>
+
+    <div class="row g-4">
+      {% for topic in topic_data %}
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm border-0">
+          <div class="card-body p-4">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+              <div>
+                <h5 class="mb-0 fw-bold">{{ topic.name }}</h5>
+                {% if category.type == 'mixed' %}
+                  <span class="badge {{ 'bg-primary' if topic.src_type == 'mcq' else 'bg-success' }} mt-1">{{ topic.src_type|upper }}</span>
+                  <small class="text-muted ms-1">from {{ topic.src_cat }}</small>
+                {% endif %}
+              </div>
+              <span class="badge bg-light text-primary border">{{ topic.count }} Qs</span>
             </div>
-            <p id="cod_name" class="text-muted text-center my-2" style="font-size:.85rem;">No file chosen</p>
-            <button class="btn btn-success w-100">Import Coding</button>
-          </form>
-          <div class="mt-3 p-3 bg-light rounded">
-            <b style="font-size:.82rem;">CSV format:</b>
-            <code style="font-size:.75rem;display:block;margin-top:6px;white-space:pre-wrap;">question, sample_input, sample_output</code>
+            <p class="text-muted small">Bulk upload questions or manage existing ones for this topic.</p>
+            <hr>
+            <div class="d-grid gap-2">
+              <button class="btn btn-primary btn-sm" onclick="showUploadModal({{ topic.id }}, '{{ topic.name }}')">
+                Bulk Upload (CSV)
+              </button>
+              <a href="/admin/topic/{{ topic.id }}/manage" class="btn btn-info btn-sm text-white">View Questions</a>
+              <a href="/admin/quiz/create?topic_id={{ topic.id }}" class="btn btn-outline-success btn-sm">Create Quiz</a>
+              <form action="/admin/topic/{{ topic.id }}/clear" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete ALL questions in this topic? This cannot be undone.');">
+                <input type="hidden" name="cat_id" value="{{ category.id }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm w-100 mt-1">Clear All Questions</button>
+              </form>
+            </div>
           </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal fade" id="uploadModal" tabindex="-1">
+      <div class="modal-dialog">
+        <form class="modal-content" method="post" action="/admin/topic/upload" enctype="multipart/form-data">
+          <div class="modal-header">
+            <h5 class="modal-title">Bulk Upload: <span id="modalTopicName"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="topic_id" id="modalTopicId">
+            <input type="hidden" name="cat_type" value="{{ category.type }}">
+            
+            <div class="alert alert-info small mb-3">
+              <h6 class="fw-bold mb-1">Required CSV Headers:</h6>
+              {% if category.type == 'mcq' %}
+                <code class="d-block mb-1 p-2 bg-light border rounded">question, a, b, c, d, answer</code>
+                <span class="text-muted">Note: 'answer' should be a, b, c, or d.</span>
+              {% else %}
+                <code class="d-block mb-1 p-2 bg-light border rounded">question, sample_input, sample_output</code>
+              {% endif %}
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold">Select CSV/JSON File</label>
+              <input type="file" name="file" class="form-control" accept=".csv,.json" required>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary px-4">Upload Questions</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      function showUploadModal(id, name) {
+        document.getElementById('modalTopicId').value = id;
+        document.getElementById('modalTopicName').innerText = name;
+        new bootstrap.Modal(document.getElementById('uploadModal')).show();
+      }
+    </script>
+    """, category=category, topic_data=topic_data, active='categories')
+
+
+@admin_bp.route('/admin/topic/upload', methods=['POST'])
+def topic_upload():
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    topic_id = request.form.get('topic_id')
+    cat_type = request.form.get('cat_type')
+    f = request.files.get('file')
+    
+    if not f or not f.filename:
+        return redirect(request.referrer or '/admin/categories')
+
+    content = f.read().decode('utf-8', errors='ignore')
+    ext = f.filename.rsplit('.', 1)[-1].lower()
+    imported = 0
+    
+    try:
+        rows = json.loads(content) if ext == 'json' else list(csv.DictReader(io.StringIO(content)))
+        with get_db() as conn:
+            for raw in rows:
+                r = normalize_row(raw)
+                if cat_type == 'mcq':
+                    q = find_col(r, 'question', 'q', 'ques')
+                    oa = find_col(r, 'a', 'option_a', 'opt_a', 'opt1')
+                    ob = find_col(r, 'b', 'option_b', 'opt_b', 'opt2')
+                    oc = find_col(r, 'c', 'option_c', 'opt_c', 'opt3')
+                    od = find_col(r, 'd', 'option_d', 'opt_d', 'opt4')
+                    ans = find_col(r, 'answer', 'ans', 'correct')
+                    if q:
+                        # Check if question already exists in this topic
+                        exists = conn.execute("SELECT id FROM questions WHERE topic_id=? AND question=?", (topic_id, q)).fetchone()
+                        if not exists:
+                            conn.execute(
+                                "INSERT INTO questions(question,a,b,c,d,answer,published,topic_id) VALUES(?,?,?,?,?,?,1,?)",
+                                (q, oa, ob, oc, od, ans.lower(), topic_id)
+                            )
+                            imported += 1
+                else:
+                    q = find_col(r, 'question', 'q', 'ques')
+                    si = find_col(r, 'sample_input', 'input')
+                    so = find_col(r, 'sample_output', 'output')
+                    if q:
+                        # Check if question already exists in this topic
+                        exists = conn.execute("SELECT id FROM coding_questions WHERE topic_id=? AND question=?", (topic_id, q)).fetchone()
+                        if not exists:
+                            conn.execute(
+                                "INSERT INTO coding_questions(question,sample_input,sample_output,published,topic_id) VALUES(?,?,?,1,?)",
+                                (q, si, so, topic_id)
+                            )
+                            imported += 1
+            conn.commit()
+    except Exception as e:
+        print(f"Upload error: {e}")
+        
+    return redirect(f"/admin/topic/{topic_id}/manage?msg=uploaded")
+
+
+@admin_bp.route('/admin/topic/<int:topic_id>/clear', methods=['POST'])
+def clear_topic_questions(topic_id):
+    if session.get('role') != 'admin':
+        return redirect('/login')
+        
+    cat_id = request.form.get('cat_id')
+    
+    with get_db() as conn:
+        # Check category type to know which table to clear
+        topic = conn.execute("SELECT c.type FROM topics t JOIN categories c ON t.category_id = c.id WHERE t.id=?", (topic_id,)).fetchone()
+        if topic:
+            if topic['type'] == 'mcq':
+                conn.execute("DELETE FROM questions WHERE topic_id=?", (topic_id,))
+            else:
+                conn.execute("DELETE FROM coding_questions WHERE topic_id=?", (topic_id,))
+            conn.commit()
+            
+    return redirect(f'/admin/category/{cat_id}')
+
+
+@admin_bp.route('/admin/topic/<int:topic_id>/manage')
+def admin_manage_topic_questions(topic_id):
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    conn = get_db()
+    topic = conn.execute("SELECT t.*, c.type as cat_type, c.name as cat_name FROM topics t JOIN categories c ON t.category_id = c.id WHERE t.id = ?", (topic_id,)).fetchone()
+    
+    if not topic:
+        return redirect('/admin/categories')
+
+    if topic['cat_type'] == 'mcq':
+        questions = conn.execute("SELECT * FROM questions WHERE topic_id = ?", (topic_id,)).fetchall()
+    else:
+        questions = conn.execute("SELECT * FROM coding_questions WHERE topic_id = ?", (topic_id,)).fetchall()
+    
+    conn.close()
+    
+    msg = request.args.get('msg')
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h4 class="mb-0">{{ topic.name }} - Manage Questions</h4>
+        <p class="text-muted small mb-0">{{ topic.cat_name }} ({{ topic.cat_type|upper }})</p>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="/admin/topic/{{ topic.id }}/bulk_publish?action=publish" class="btn btn-success btn-sm">Publish All</a>
+        <a href="/admin/topic/{{ topic.id }}/bulk_publish?action=unpublish" class="btn btn-outline-secondary btn-sm">Unpublish All</a>
+        <a href="/admin/category/{{ topic.category_id }}" class="btn btn-outline-secondary btn-sm">Back to Topics</a>
+      </div>
+    </div>
+
+    {% if msg == 'uploaded' %}
+    <div class="alert alert-success">Bulk upload successful! Questions are listed below.</div>
+    {% endif %}
+
+    <div class="card shadow-sm border-0">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 50px;">ID</th>
+                <th>Question Content</th>
+                {% if topic.cat_type == 'mcq' %}
+                  <th>Options</th>
+                  <th>Answer</th>
+                {% else %}
+                  <th>Sample Input</th>
+                  <th>Sample Output</th>
+                {% endif %}
+                <th>Status</th>
+                <th class="text-end" style="width: 150px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for q in questions %}
+              <tr>
+                <td>{{ q.id }}</td>
+                <td>
+                  <div style="max-width: 350px;" class="text-truncate" title="{{ q.question }}">
+                    {{ q.question }}
+                  </div>
+                </td>
+                {% if topic.cat_type == 'mcq' %}
+                  <td>
+                    <small class="text-muted">
+                      A: {{ q.a }} | B: {{ q.b }} | C: {{ q.c }} | D: {{ q.d }}
+                    </small>
+                  </td>
+                  <td><span class="badge bg-primary">{{ q.answer|upper }}</span></td>
+                {% else %}
+                  <td><code>{{ q.sample_input }}</code></td>
+                  <td><code>{{ q.sample_output }}</code></td>
+                {% endif %}
+                <td>
+                  {% if q.published %}
+                    <span class="badge bg-success">Published</span>
+                  {% else %}
+                    <span class="badge bg-secondary">Draft</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <div class="dropdown">
+                    <button class="btn btn-sm btn-light border dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                      Manage
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                      <li>
+                        <a class="dropdown-item" href="/admin/question/edit/{{ q.id }}?topic_id={{ topic.id }}" {% if topic.cat_type == 'coding' %}hidden{% endif %}>
+                          Edit MCQ
+                        </a>
+                        <a class="dropdown-item" href="/admin/coding_question/edit/{{ q.id }}?topic_id={{ topic.id }}" {% if topic.cat_type == 'mcq' %}hidden{% endif %}>
+                          Edit Coding
+                        </a>
+                      </li>
+                      <li>
+                        <a class="dropdown-item" href="/admin/topic/{{ topic.id }}/toggle/{{ q.id }}?type={{ topic.cat_type }}">
+                          {{ 'Unpublish' if q.published else 'Publish' }}
+                        </a>
+                      </li>
+                      <li><hr class="dropdown-divider"></li>
+                      <li>
+                        <a class="dropdown-item text-danger" href="/admin/topic/{{ topic.id }}/delete/{{ q.id }}?type={{ topic.cat_type }}" onclick="return confirm('Are you sure?')">
+                          Delete
+                        </a>
+                      </li>
+                    </ul>
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="6" class="text-center py-4 text-muted">
+                  No questions found for this topic. Use "Bulk Upload" to add some.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
 
-    <div class="card p-3 mt-4">
-      <h6 class="mb-3">Download Sample Files</h6>
-      <div class="d-flex gap-3 flex-wrap">
-        <a href="/admin/sample/mcq_csv" class="btn btn-outline-primary btn-sm">MCQ Sample CSV</a>
-        <a href="/admin/sample/mcq_json" class="btn btn-outline-primary btn-sm">MCQ Sample JSON</a>
-        <a href="/admin/sample/coding_csv" class="btn btn-outline-success btn-sm">Coding Sample CSV</a>
-        <a href="/admin/sample/coding_json" class="btn btn-outline-success btn-sm">Coding Sample JSON</a>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    """, topic=topic, questions=questions, msg=msg, active='categories')
+
+
+@admin_bp.route('/admin/topic/<int:topic_id>/toggle/<int:q_id>')
+def toggle_question_status(topic_id, q_id):
+    if session.get('role') != 'admin': return redirect('/login')
+    qtype = request.args.get('type', 'mcq')
+    table = 'questions' if qtype == 'mcq' else 'coding_questions'
+    
+    with get_db() as conn:
+        conn.execute(f"UPDATE {table} SET published = 1 - published WHERE id = ?", (q_id,))
+        conn.commit()
+    return redirect(f"/admin/topic/{topic_id}/manage")
+
+
+@admin_bp.route('/admin/topic/<int:topic_id>/delete/<int:q_id>')
+def delete_topic_question(topic_id, q_id):
+    if session.get('role') != 'admin': return redirect('/login')
+    qtype = request.args.get('type', 'mcq')
+    table = 'questions' if qtype == 'mcq' else 'coding_questions'
+    
+    with get_db() as conn:
+        conn.execute(f"DELETE FROM {table} WHERE id = ?", (q_id,))
+        conn.commit()
+    return redirect(f"/admin/topic/{topic_id}/manage")
+
+@admin_bp.route('/admin/topic/<int:topic_id>/bulk_publish')
+def bulk_publish_topic(topic_id):
+    if session.get('role') != 'admin': return redirect('/login')
+    action = request.args.get('action', 'publish')
+    val = 1 if action == 'publish' else 0
+    
+    conn = get_db()
+    topic = conn.execute("SELECT t.*, c.type as cat_type FROM topics t JOIN categories c ON t.category_id = c.id WHERE t.id = ?", (topic_id,)).fetchone()
+    if topic:
+        table = 'questions' if topic['cat_type'] == 'mcq' else 'coding_questions'
+        conn.execute(f"UPDATE {table} SET published = ? WHERE topic_id = ?", (val, topic_id))
+        conn.commit()
+    conn.close()
+    return redirect(f"/admin/topic/{topic_id}/manage")
+
+@admin_bp.route('/admin/question/edit/<int:qid>', methods=['GET', 'POST'])
+def edit_mcq(qid):
+    if session.get('role') != 'admin': return redirect('/login')
+    topic_id = request.args.get('topic_id')
+    
+    conn = get_db()
+    if request.method == 'POST':
+        conn.execute("""
+            UPDATE questions SET question=?, a=?, b=?, c=?, d=?, answer=? WHERE id=?
+        """, (request.form['q'], request.form['a'], request.form['b'], 
+              request.form['c'], request.form['d'], request.form['ans'], qid))
+        conn.commit()
+        conn.close()
+        return redirect(f"/admin/topic/{topic_id}/manage" if topic_id else "/admin/categories")
+
+    q = conn.execute("SELECT * FROM questions WHERE id=?", (qid,)).fetchone()
+    conn.close()
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <h4 class="mb-4">Edit MCQ Question</h4>
+    <form method="post" class="card p-4 shadow-sm border-0">
+      <div class="mb-3">
+        <label class="form-label">Question</label>
+        <textarea name="q" class="form-control" rows="3" required>{{ q.question }}</textarea>
       </div>
-    </div>
-  </div>
-</div>
-    """, result=result, active='upload',
-    imported_questions=imported_questions, import_qtype=import_qtype)
+      <div class="row g-3">
+        <div class="col-md-6"><label>Option A</label><input name="a" class="form-control" value="{{ q.a }}" required></div>
+        <div class="col-md-6"><label>Option B</label><input name="b" class="form-control" value="{{ q.b }}" required></div>
+        <div class="col-md-6"><label>Option C</label><input name="c" class="form-control" value="{{ q.c }}" required></div>
+        <div class="col-md-6"><label>Option D</label><input name="d" class="form-control" value="{{ q.d }}" required></div>
+      </div>
+      <div class="mt-3 mb-4">
+        <label class="form-label">Correct Answer</label>
+        <select name="ans" class="form-select">
+          <option value="a" {% if q.answer=='a' %}selected{% endif %}>A</option>
+          <option value="b" {% if q.answer=='b' %}selected{% endif %}>B</option>
+          <option value="c" {% if q.answer=='c' %}selected{% endif %}>C</option>
+          <option value="d" {% if q.answer=='d' %}selected{% endif %}>D</option>
+        </select>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary">Update Question</button>
+        <a href="javascript:history.back()" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+    """, q=q, active='categories')
+
+
+@admin_bp.route('/admin/coding_question/edit/<int:qid>', methods=['GET', 'POST'])
+def edit_coding(qid):
+    if session.get('role') != 'admin': return redirect('/login')
+    topic_id = request.args.get('topic_id')
+    
+    conn = get_db()
+    if request.method == 'POST':
+        conn.execute("""
+            UPDATE coding_questions SET question=?, sample_input=?, sample_output=? WHERE id=?
+        """, (request.form['q'], request.form['si'], request.form['so'], qid))
+        conn.commit()
+        conn.close()
+        return redirect(f"/admin/topic/{topic_id}/manage" if topic_id else "/admin/categories")
+
+    q = conn.execute("SELECT * FROM coding_questions WHERE id=?", (qid,)).fetchone()
+    conn.close()
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <h4 class="mb-4">Edit Coding Question</h4>
+    <form method="post" class="card p-4 shadow-sm border-0">
+      <div class="mb-3">
+        <label class="form-label">Question Description</label>
+        <textarea name="q" class="form-control" rows="5" required>{{ q.question }}</textarea>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Sample Input</label>
+        <input name="si" class="form-control" value="{{ q.sample_input }}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Sample Output</label>
+        <input name="so" class="form-control" value="{{ q.sample_output }}">
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-success">Update Question</button>
+        <a href="javascript:history.back()" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+    """, q=q, active='categories')
+
+@admin_bp.route('/admin/quiz/create', methods=['GET', 'POST'])
+def quiz_create():
+    if session.get('role') != 'admin':
+        return redirect('/login')
+    
+    conn = get_db()
+    
+    if request.method == 'POST':
+        name = request.form.get('quiz_name')
+        cat_id = request.form.get('category_id')
+        time_limit = request.form.get('time_limit', 0)
+        pos_marks = request.form.get('pos_marks', 1)
+        neg_marks = request.form.get('neg_marks', 0)
+        shuffle = 1 if request.form.get('shuffle') else 0
+        attempts = request.form.get('attempts', 1)
+        
+        # Save Quiz
+        cur = conn.execute("""
+            INSERT INTO quizzes (name, category_id, time_limit, positive_marks, negative_marks, shuffle_questions, attempt_limit, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, cat_id, time_limit, pos_marks, neg_marks, shuffle, attempts, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        quiz_id = cur.lastrowid
+        
+        selection_mode = request.form.get('selection_mode') # 'random' or 'manual'
+        
+        if selection_mode == 'random':
+            topic_ids = request.form.getlist('topic_ids')
+            for tid in topic_ids:
+                count = request.form.get(f'count_{tid}', 0)
+                qtype = request.form.get(f'qtype_{tid}', 'mcq')
+                if int(count) > 0:
+                    conn.execute("INSERT INTO quiz_topics (quiz_id, topic_id, question_count, question_type) VALUES (?, ?, ?, ?)", (quiz_id, tid, count, qtype))
+        else:
+            q_ids = request.form.getlist('manual_q_ids')
+            cat_type = conn.execute("SELECT type FROM categories WHERE id=?", (cat_id,)).fetchone()[0]
+            for qid in q_ids:
+                conn.execute("INSERT INTO quiz_manual_questions (quiz_id, question_id, type) VALUES (?, ?, ?)", (quiz_id, qid, cat_type))
+        
+        conn.commit()
+        conn.close()
+        return redirect('/admin/categories')
+
+    categories = conn.execute("SELECT * FROM categories").fetchall()
+    selected_topic_id = request.args.get('topic_id')
+    
+    # Fetch topics with their source category type for mixed quiz support
+    topics = conn.execute("SELECT t.*, c.name as cat_name, c.type as cat_type FROM topics t JOIN categories c ON t.category_id = c.id").fetchall()
+    
+    conn.close()
+    
+    return render_template_string(CSS + SIDEBAR + """
+    <h4 class="mb-4">Create New Quiz</h4>
+    <form method="post" class="card shadow-sm border-0 p-4">
+      <div class="row g-4">
+        <!-- Section 1: Basic Info -->
+        <div class="col-md-6">
+          <label class="form-label fw-bold">Quiz Name</label>
+          <input name="quiz_name" class="form-control" placeholder="e.g. Python Basics Midterm" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-bold">Category</label>
+          <select name="category_id" id="cat_select" class="form-select" required onchange="filterTopics()">
+            <option value="">-- Select Category --</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}" data-type="{{ cat.type }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Section 2: Rules -->
+        <div class="col-12"><hr></div>
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Time Limit (mins)</label>
+          <input type="number" name="time_limit" class="form-control" value="30">
+          <small class="text-muted">0 for no limit</small>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Positive Marks</label>
+          <input type="number" step="0.1" name="pos_marks" class="form-control" value="1">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Negative Marks</label>
+          <input type="number" step="0.1" name="neg_marks" class="form-control" value="0">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-bold">Attempt Limit</label>
+          <input type="number" name="attempts" class="form-control" value="1">
+        </div>
+        <div class="col-md-3 mt-4">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="shuffle" id="shuffle" checked>
+            <label class="form-check-label fw-bold" for="shuffle">Shuffle Questions</label>
+          </div>
+        </div>
+
+        <!-- Section 3: Question Selection -->
+        <div class="col-12"><hr></div>
+        <div class="col-12">
+          <h6 class="fw-bold mb-3">Question Selection Mode</h6>
+          <div class="btn-group w-100" role="group">
+            <input type="radio" class="btn-check" name="selection_mode" id="mode_random" value="random" checked onclick="toggleMode('random')">
+            <label class="btn btn-outline-primary" for="mode_random">Randomly generate from topics</label>
+            <input type="radio" class="btn-check" name="selection_mode" id="mode_manual" value="manual" onclick="toggleMode('manual')">
+            <label class="btn btn-outline-primary" for="mode_manual">Manually select questions</label>
+          </div>
+        </div>
+
+        <!-- Random Mode: Topic List -->
+        <div id="random_config" class="col-12">
+          <table class="table table-sm mt-3">
+            <thead>
+              <tr><th>Select Topic</th><th>Questions to include</th></tr>
+            </thead>
+            <tbody id="topic_list_body">
+              {% for t in topics %}
+              <tr class="topic-row" data-cat="{{ t.category_id }}" data-type="{{ t.cat_type }}">
+                <td class="align-middle">
+                  <strong>{{ t.name }}</strong>
+                  <span class="badge {{ 'bg-primary' if t.cat_type == 'mcq' else 'bg-success' }} ms-2">{{ t.cat_type|upper }}</span>
+                  <small class="text-muted ms-1">({{ t.cat_name }})</small>
+                  <input type="hidden" name="topic_ids" value="{{ t.id }}">
+                  <input type="hidden" name="qtype_{{ t.id }}" value="{{ t.cat_type }}">
+                </td>
+                <td>
+                  <input type="number" name="count_{{ t.id }}" class="form-control form-control-sm" style="width:100px;" value="0" min="0">
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Manual Mode Placeholder -->
+        <div id="manual_config" class="col-12 d-none">
+          <div class="alert alert-secondary text-center py-4">
+             Manual selection UI will appear here after selecting a category.
+             <br><small>(Coming soon: AJAX search for questions)</small>
+          </div>
+        </div>
+
+        <div class="col-12 mt-4 text-end">
+          <button type="submit" class="btn btn-success px-5">Save Quiz Configuration</button>
+        </div>
+      </div>
+    </form>
+
+    <script>
+      function filterTopics() {
+        const catSel = document.getElementById('cat_select');
+        const catId = catSel.value;
+        const selectedOpt = catSel.options[catSel.selectedIndex];
+        const catType = selectedOpt ? selectedOpt.dataset.type : '';
+        
+        document.querySelectorAll('.topic-row').forEach(row => {
+          if (catType === 'mixed') {
+            // For mixed categories, show topics from both mcq and coding categories
+            const topicType = row.dataset.type;
+            if (topicType === 'mcq' || topicType === 'coding') {
+              row.classList.remove('d-none');
+            } else {
+              row.classList.add('d-none');
+            }
+          } else if (row.dataset.cat == catId || catId == "") {
+            row.classList.remove('d-none');
+          } else {
+            row.classList.add('d-none');
+          }
+        });
+      }
+
+      function toggleMode(mode) {
+        if (mode === 'random') {
+          document.getElementById('random_config').classList.remove('d-none');
+          document.getElementById('manual_config').classList.add('d-none');
+        } else {
+          document.getElementById('random_config').classList.add('d-none');
+          document.getElementById('manual_config').classList.remove('d-none');
+        }
+      }
+    </script>
+    <style>
+      .topic-row:hover { background-color: #f8f9fa; }
+      .topic-row td { vertical-align: middle; }
+      .btn-check:checked + .btn-outline-primary {
+        background-color: #0d6efd;
+        color: white;
+      }
+    </style>
+    """, categories=categories, topics=topics, active='categories')
+
+
 
 
 @admin_bp.route('/admin/sample/<kind>')
@@ -926,75 +1392,4 @@ def sample_file(kind):
                     headers={"Content-Disposition": f"attachment;filename={filename}"})
 
 
-@admin_bp.route('/admin/publish/mcq/<int:qid>')
-def publish_mcq(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("UPDATE questions SET published=1 WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_mcq')
 
-
-@admin_bp.route('/admin/unpublish/mcq/<int:qid>')
-def unpublish_mcq(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("UPDATE questions SET published=0 WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_mcq')
-
-
-@admin_bp.route('/admin/publish/coding/<int:qid>')
-def publish_coding(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("UPDATE coding_questions SET published=1 WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_coding')
-
-
-@admin_bp.route('/admin/unpublish/coding/<int:qid>')
-def unpublish_coding(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("UPDATE coding_questions SET published=0 WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_coding')
-
-
-@admin_bp.route('/admin/publish_all/<qtype>')
-def publish_all(qtype):
-    if session.get('role') != 'admin': return redirect('/login')
-    table = 'questions' if qtype == 'mcq' else 'coding_questions'
-    with get_db() as conn:
-        conn.execute(f"UPDATE {table} SET published=1")
-        conn.commit()
-    return redirect(f"/admin/add_{'mcq' if qtype == 'mcq' else 'coding'}")
-
-
-@admin_bp.route('/admin/unpublish_all/<qtype>')
-def unpublish_all(qtype):
-    if session.get('role') != 'admin': return redirect('/login')
-    table = 'questions' if qtype == 'mcq' else 'coding_questions'
-    with get_db() as conn:
-        conn.execute(f"UPDATE {table} SET published=0")
-        conn.commit()
-    return redirect(f"/admin/add_{'mcq' if qtype == 'mcq' else 'coding'}")
-
-
-@admin_bp.route('/admin/delete_mcq/<int:qid>')
-def delete_mcq(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("DELETE FROM questions WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_mcq')
-
-
-@admin_bp.route('/admin/delete_coding/<int:qid>')
-def delete_coding(qid):
-    if session.get('role') != 'admin': return redirect('/login')
-    with get_db() as conn:
-        conn.execute("DELETE FROM coding_questions WHERE id=?", (qid,))
-        conn.commit()
-    return redirect('/admin/add_coding')

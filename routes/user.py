@@ -14,14 +14,71 @@ def dashboard():
 
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE username=?", (session['username'],)).fetchone()
-    try:
-        mcq_count = conn.execute("SELECT COUNT(*) FROM questions WHERE published=1").fetchone()[0]
-    except Exception:
-        mcq_count = 0
-    try:
-        coding_count = conn.execute("SELECT COUNT(*) FROM coding_questions WHERE published=1").fetchone()[0]
-    except Exception:
-        coding_count = 0
+    
+    # Fetch dynamic settings
+    settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
+    pass_per = float(settings.get('pass_percentage', 60))
+    wait_days = int(settings.get('retake_wait_days', 7))
+    expiry_h = int(settings.get('quiz_expiry_hours', 48))
+
+    # Fetch user attempts for per-quiz lockout
+    user_attempts = conn.execute("""
+        SELECT quiz_id, percentage, attempt_date 
+        FROM user_quiz_attempts 
+        WHERE username=? 
+        ORDER BY attempt_date DESC
+    """, (session['username'],)).fetchall()
+    
+    attempts_by_quiz = {}
+    for att in user_attempts:
+        if att['quiz_id'] not in attempts_by_quiz:
+            attempts_by_quiz[att['quiz_id']] = att
+
+    # Fetch active quizzes
+    active_quizzes_raw = conn.execute("""
+        SELECT q.*, c.name as cat_name, c.type as cat_type 
+        FROM quizzes q 
+        JOIN categories c ON q.category_id = c.id 
+        WHERE q.is_active = 1
+    """).fetchall()
+    
+    active_quizzes = []
+    for q in active_quizzes_raw:
+        q_dict = dict(q)
+        q_dict['is_expired'] = False
+        if q_dict.get('created_at'):
+            created = datetime.strptime(q_dict['created_at'], "%Y-%m-%d %H:%M:%S")
+            if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
+                q_dict['is_expired'] = True
+        
+        # Per-quiz lockout logic
+        q_dict['is_locked'] = False
+        q_dict['lock_message'] = ""
+        q_dict['is_passed'] = False
+        
+        att = attempts_by_quiz.get(q_dict['id'])
+        if att:
+            if att['percentage'] >= pass_per:
+                q_dict['is_passed'] = True
+            else:
+                last_date = datetime.strptime(att['attempt_date'], "%Y-%m-%d %H:%M:%S")
+                diff = datetime.now() - last_date
+                if diff.total_seconds() < wait_days * 24 * 3600:
+                    q_dict['is_locked'] = True
+                    rem_seconds = int(wait_days * 24 * 3600 - diff.total_seconds())
+                    d = rem_seconds // (24 * 3600)
+                    h = (rem_seconds % (24 * 3600)) // 3600
+                    m = (rem_seconds % 3600) // 60
+                    parts = []
+                    if d > 0: parts.append(f"{d}d")
+                    if h > 0: parts.append(f"{h}h")
+                    if m > 0: parts.append(f"{m}m")
+                    q_dict['lock_message'] = "Try again in " + " ".join(parts)
+        
+        active_quizzes.append(q_dict)
+    
+    mcq_count = conn.execute("SELECT COUNT(*) FROM questions WHERE published=1").fetchone()[0]
+    coding_count = conn.execute("SELECT COUNT(*) FROM coding_questions WHERE published=1").fetchone()[0]
     conn.close()
 
     quiz_status = user['quiz_status'] or 'not_started'
@@ -42,6 +99,7 @@ def dashboard():
                 display:flex; justify-content:space-between; align-items:center; }
       .exam-card { border-radius:14px; overflow:hidden; transition:transform .2s; }
       .exam-card:hover { transform:translateY(-4px); box-shadow:0 8px 24px rgba(0,0,0,.15); }
+      .waiting-box { background:#fff3cd; border:1px solid #ffeeba; color:#856404; padding:15px; border-radius:10px; margin-bottom:20px; text-align:center; }
     </style>
 
     <div class="topbar">
@@ -61,11 +119,11 @@ def dashboard():
         <div class="d-flex justify-content-between align-items-center">
           <div>
             <h4 class="mb-1">Welcome back, <b>{{ username }}</b>!</h4>
-            <p class="mb-0" style="opacity:.85;">Ready to take your exam? Choose a section below.</p>
+            <p class="mb-0" style="opacity:.85;">Ready for your next assessment?</p>
           </div>
           <div class="text-end">
             <span class="badge bg-light text-dark fs-6 px-3 py-2">
-              Quiz: <b>{{ status_label }}</b>
+              Status: <b>{{ status_label }}</b>
             </span>
           </div>
         </div>
@@ -94,39 +152,37 @@ def dashboard():
         </div>
       </div>
 
+      <h5 class="mb-3">Available Quizzes</h5>
       <div class="row g-4 mb-4">
+        {% for quiz in active_quizzes %}
         <div class="col-md-6">
-          <div class="card exam-card">
-            <div style="background:linear-gradient(135deg,#0061ff,#60efff);padding:24px;color:#fff;">
-              <h5 class="mb-1">MCQ Exam</h5>
-              <p class="mb-0" style="opacity:.85;">Multiple choice questions — 10 sec per question</p>
+          <div class="card exam-card h-100 shadow-sm">
+            <div style="background:linear-gradient(135deg, {{ '#0061ff,#60efff' if quiz.cat_type == 'mcq' else ('#11998e,#38ef7d' if quiz.cat_type == 'coding' else '#667eea,#764ba2') }});padding:24px;color:#fff;">
+              <h5 class="mb-1">{{ quiz.name }}</h5>
+              <p class="mb-0 small" style="opacity:.85;">{{ quiz.cat_name }} | {{ quiz.time_limit }} mins | +{{ quiz.positive_marks }}/-{{ quiz.negative_marks }} marks</p>
+              {% if quiz.cat_type == 'mixed' %}
+                <span class="badge bg-light text-dark mt-2">🔀 MCQ + Coding</span>
+              {% endif %}
             </div>
             <div class="p-3 d-flex justify-content-between align-items-center">
-              <span class="text-muted">{{ mcq_count }} questions available</span>
-              {% if quiz_status == 'completed' %}
-                <span class="btn btn-secondary btn-sm disabled">Completed</span>
+              <span class="text-muted small">Pass Criteria: {{ pass_per }}%</span>
+              {% if quiz.is_passed %}
+                <button class="btn btn-success btn-sm disabled">Passed &#10004;</button>
+              {% elif quiz.is_locked %}
+                <button class="btn btn-secondary btn-sm disabled">Locked ({{ quiz.lock_message.replace('Try again in ', '') }})</button>
+              {% elif quiz.is_expired %}
+                <button class="btn btn-danger btn-sm disabled">Expired</button>
               {% else %}
-                <a href="/quiz" class="btn btn-primary btn-sm">Start MCQ</a>
+                <a href="/instructions?quiz_id={{ quiz.id }}" class="btn btn-{{ 'primary' if quiz.cat_type == 'mcq' else ('success' if quiz.cat_type == 'coding' else 'info') }} btn-sm">Start Quiz</a>
               {% endif %}
             </div>
           </div>
         </div>
-        <div class="col-md-6">
-          <div class="card exam-card">
-            <div style="background:linear-gradient(135deg,#11998e,#38ef7d);padding:24px;color:#fff;">
-              <h5 class="mb-1">Coding Exam</h5>
-              <p class="mb-0" style="opacity:.85;">Write Python code — 30 min timer</p>
-            </div>
-            <div class="p-3 d-flex justify-content-between align-items-center">
-              <span class="text-muted">{{ coding_count }} questions available</span>
-              {% if quiz_status == 'completed' %}
-                <span class="btn btn-secondary btn-sm disabled">Completed</span>
-              {% else %}
-                <a href="/coding" class="btn btn-success btn-sm">Start Coding</a>
-              {% endif %}
-            </div>
-          </div>
+        {% else %}
+        <div class="col-12 text-center py-5">
+           <p class="text-muted">No quizzes available at the moment.</p>
         </div>
+        {% endfor %}
       </div>
 
       <div class="card p-3">
@@ -151,11 +207,12 @@ def dashboard():
     """,
     username=session['username'],
     now=datetime.now().strftime("%A, %d %B %Y  %I:%M %p"),
-    quiz_status=quiz_status,
     quiz_score=quiz_score,
-    login_count=login_count,
-    last_login=last_login,
     mcq_count=mcq_count,
     coding_count=coding_count,
+    login_count=login_count,
+    last_login=last_login,
     status_color=status_color[quiz_status],
-    status_label=status_label[quiz_status])
+    status_label=status_label[quiz_status],
+    pass_per=int(pass_per),
+    active_quizzes=active_quizzes)

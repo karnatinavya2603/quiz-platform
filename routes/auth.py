@@ -47,6 +47,10 @@ def login():
                     "UPDATE users SET login_count=login_count+1, last_login=? WHERE username=?",
                     (now, user['username'])
                 )
+                conn.execute(
+                    "INSERT INTO login_history (username, login_date) VALUES (?, ?)",
+                    (user['username'], now)
+                )
                 conn.commit()
 
             notify_admin_login(user['username'], user['email'], user['role'], now)
@@ -104,7 +108,7 @@ def register():
                         (username, email, password, role, token)
                     )
                     conn.commit()
-                notify_admin_registration(username, email, role, token)
+                notify_admin_registration(username, email, role, token, request.host_url)
                 return render_template_string(CSS + """
                 <div class="container mt-5 d-flex justify-content-center">
                   <div class="card p-4 text-center" style="width:380px">

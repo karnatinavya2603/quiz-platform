@@ -873,10 +873,15 @@ def quiz():
 
     # Handle answer submission
     if request.method == 'POST':
-        ans = request.form.get('opt', '')
+        ans = request.form.get('opt', '').lower()
         q   = session['q_list'][session['q_index']]
-        if ans.lower() == q['answer'].lower():
+        
+        expected_ans = str(q['answer']).lower().strip()
+        selected_text = str(q.get(ans, '')).lower().strip()
+        
+        if ans == expected_ans or selected_text == expected_ans:
             session['score'] += 1
+            
         session['total']   += 1
         session['q_index'] += 1
 
@@ -1054,7 +1059,22 @@ def coding():
         <div class="col-md-8">
           <div class="card p-3">
             <form method="post" id="cform">
-              <div id="editor" style="height:320px;border-radius:6px;"></div>
+              <div class="d-flex justify-content-between align-items-center mb-2 bg-light p-2 rounded-top border-bottom">
+                <div class="d-flex align-items-center gap-2">
+                  <select id="lang_select" class="form-select form-select-sm fw-bold border-0 bg-transparent" style="width:auto; cursor:pointer;" onchange="updateMode()">
+                    <option value="python">🐍 Python 3 (IDLE Mode)</option>
+                  </select>
+                  <span id="compiler_badge" class="badge rounded-pill bg-success" style="font-size:0.65rem; padding: 4px 8px;">REAL-TIME ACTIVE</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="live_run_toggle" checked>
+                    <label class="form-check-label text-muted" style="font-size:0.75rem;" for="live_run_toggle">Auto-Run</label>
+                  </div>
+                  <span id="run_status" class="badge bg-secondary" style="font-size: 0.65rem;">IDLE</span>
+                </div>
+              </div>
+              <div id="editor" style="height:350px; border: 1px solid #dee2e6; border-top:0; position: relative; width: 100%; display: block; background: #272822; z-index: 10;"></div>
               <textarea name="code" id="code_ta" hidden></textarea>
 
               <div class="mt-2 d-flex gap-2">
@@ -1064,30 +1084,145 @@ def coding():
               </div>
             </form>
 
-            <pre id="live_out" class="mt-2 p-2 bg-dark text-white rounded" style="min-height:48px;font-size:.85rem;">{{ output }}</pre>
+            <div class="mt-0">
+              <div class="p-2 bg-dark text-white-50 small fw-bold d-flex justify-content-between align-items-center rounded-bottom" style="font-size:0.7rem; border-top: 1px solid #444;">
+                <span>TERMINAL OUTPUT</span>
+                <span id="char_count">0 chars</span>
+              </div>
+              <pre id="live_out" class="mt-2 p-3 bg-dark text-white rounded-3 shadow-sm border-0" style="min-height:120px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size:.9rem; overflow-x:auto; border-left: 5px solid #6c757d; border-radius: 0 0 8px 8px;">{{ output }}</pre>
+            </div>
           </div>
         </div>
 
       </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js"></script>
     <script>
-    var editor = ace.edit("editor");
-    editor.setTheme("ace/theme/monokai");
-    editor.session.setMode("ace/mode/python");
-    editor.setValue("# Write your Python solution here\\n");
-    editor.clearSelection();
+    window.onerror = function(msg, url, line) {
+        console.error("Global Error: ", msg, url, line);
+        const statusEl = document.getElementById('run_status');
+        if (statusEl) {
+            statusEl.innerText = 'ERR: ' + msg.split('\n')[0];
+            statusEl.className = 'badge bg-danger';
+            statusEl.title = msg;
+        }
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.32.3/src-min-noconflict/ace.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ace-builds@1.32.3/src-min-noconflict/ext-language_tools.js"></script>
+    <script>
+    let editor;
+    let debounceTimer;
+    
+    window.onload = function() {
+        if (typeof ace !== 'undefined') {
+            editor = ace.edit("editor");
+        ace.require("ace/ext/language_tools");
+        
+        window.updateMode = function() {
+            const lang = document.getElementById('lang_select').value;
+            if (lang === 'python') {
+                editor.session.setMode("ace/mode/python");
+                editor.setOptions({
+                    enableBasicAutocompletion: true,
+                    enableLiveAutocompletion: true,
+                    enableSnippets: true,
+                    useSoftTabs: true,
+                    tabSize: 4,
+                    behavioursEnabled: true,
+                    autoScrollEditorIntoView: true
+                });
+                document.getElementById('compiler_badge').innerText = 'PYTHON REAL-TIME ACTIVE';
+            }
+        };
 
-    function sync(){ document.getElementById('code_ta').value = editor.getValue(); }
+        editor.setTheme("ace/theme/monokai");
+        editor.setReadOnly(false);
+        editor.container.style.lineHeight = "1.5";
+        editor.setOptions({
+            fontSize: "15px",
+            showPrintMargin: false,
+            displayIndentGuides: true,
+            highlightActiveLine: true,
+            wrap: true,
+            scrollPastEnd: 0.5,
+            dragEnabled: true
+        });
+        
+        updateMode();
+        editor.setValue({{ saved_code|tojson if saved_code else '"# Write your Python solution here\\n"'|safe }}, -1);
+        editor.clearSelection();
+        
+        setTimeout(() => { editor.focus(); editor.resize(); }, 100);
+        document.getElementById('editor').addEventListener('click', () => editor.focus());
 
+        window.sync = function(){ document.getElementById('code_ta').value = editor.getValue(); };
+        window.getEditorValue = function() { return editor.getValue(); };
+
+        editor.on("change", () => {
+            document.getElementById('char_count').innerText = editor.getValue().length + ' chars';
+            if (document.getElementById('live_run_toggle').checked) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(runCode, 1000);
+            }
+        });
+    } else {
+        // Fallback to plain textarea
+        console.warn("Ace not loaded, falling back to textarea.");
+        const ta = document.getElementById('code_ta');
+        const container = document.getElementById('editor');
+        ta.hidden = false;
+        ta.classList.add('form-control', 'bg-dark', 'text-white');
+        ta.style.height = '350px';
+        ta.style.fontFamily = 'monospace';
+        ta.style.fontSize = '15px';
+        container.style.display = 'none';
+        
+        window.sync = function(){};
+        window.getEditorValue = function() { return ta.value; };
+        ta.addEventListener('input', () => {
+            document.getElementById('char_count').innerText = ta.value.length + ' chars';
+            if (document.getElementById('live_run_toggle').checked) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(runCode, 1000);
+            }
+        });
+        document.getElementById('compiler_badge').className = 'badge bg-warning text-dark';
+        }
+    };
     function runCode(){
+      const statusEl = document.getElementById('run_status');
+      const outEl = document.getElementById('live_out');
+      const code = getEditorValue();
+      if (!code.trim()) return;
+
+      statusEl.innerText = 'RUNNING...';
+      statusEl.className = 'badge bg-warning text-dark';
+      outEl.style.borderLeftColor = '#ffc107';
+
       sync();
       fetch('/run_code', {
         method:'POST',
         headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:'code='+encodeURIComponent(editor.getValue())+'&input='+encodeURIComponent(document.querySelector('[name=user_input]').value)
-      }).then(r=>r.text()).then(d=>{ document.getElementById('live_out').innerText=d; });
+        body:'code='+encodeURIComponent(code)+'&input='+encodeURIComponent(document.querySelector('[name=user_input]').value)
+      }).then(r=>r.text()).then(d=>{ 
+          outEl.innerText=d; 
+          statusEl.innerText = 'DONE';
+          statusEl.className = 'badge bg-success';
+          outEl.style.borderLeftColor = '#198754';
+          setTimeout(() => {
+              if (statusEl.innerText === 'DONE') {
+                  statusEl.innerText = 'IDLE';
+                  statusEl.className = 'badge bg-secondary';
+                  outEl.style.borderLeftColor = '#6c757d';
+              }
+          }, 2000);
+      }).catch(e => {
+          statusEl.innerText = 'ERROR';
+          statusEl.className = 'badge bg-danger';
+          outEl.style.borderLeftColor = '#dc3545';
+          outEl.innerText = 'Execution Error: ' + e;
+      });
     }
 
     // 30 min countdown
@@ -2021,4 +2156,4 @@ def delete_coding(qid):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5001, host='0.0.0.0')
