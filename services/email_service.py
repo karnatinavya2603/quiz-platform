@@ -1,14 +1,17 @@
 import requests
+import os
+import threading
+import base64
+import json
 from config import SMTP_SENDER, SMTP_PASSWORD, ADMIN_EMAIL, SMTP_PORT, SMTP_USE_SSL
-SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
 
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
 
 def send_email_async(to, subject, body, pdf_path=None):
     def _send():
         # 1. Try SendGrid API first (works on Render Free Tier)
         if SENDGRID_API_KEY:
             try:
-                import json
                 url = "https://api.sendgrid.com/v3/mail/send"
                 headers = {
                     "Authorization": f"Bearer {SENDGRID_API_KEY}",
@@ -21,8 +24,16 @@ def send_email_async(to, subject, body, pdf_path=None):
                     "content": [{"type": "text/html", "value": body}]
                 }
                 
-                # Note: SendGrid attachments are complex to do with simple requests, 
-                # so we'll skip the PDF for the API version for now, or just focus on registration.
+                # Handle PDF Attachment for SendGrid
+                if pdf_path and os.path.exists(pdf_path):
+                    with open(pdf_path, "rb") as f:
+                        encoded_pdf = base64.b64encode(f.read()).decode()
+                    payload["attachments"] = [{
+                        "content": encoded_pdf,
+                        "type": "application/pdf",
+                        "filename": f"result_{to.split('@')[0]}.pdf",
+                        "disposition": "attachment"
+                    }]
                 
                 resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
                 if resp.status_code in (200, 201, 202):
