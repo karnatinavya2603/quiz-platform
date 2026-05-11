@@ -24,10 +24,7 @@ app.secret_key = "quiz_secret_2026"
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "quiz.db")
 
-# ── Email config ──────────────────────────────────────────────
-SMTP_SENDER   = "navyakarnati2603@gmail.com"
-SMTP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "ugmh qngp oyse orpr")
-ADMIN_EMAIL   = "navyakarnati2603@gmail.com"
+from config import SMTP_SENDER, SMTP_PASSWORD, ADMIN_EMAIL, SMTP_PORT, SMTP_USE_SSL
 
 # ── DB ────────────────────────────────────────────────────────
 def get_db():
@@ -145,10 +142,15 @@ def send_email_async(to, subject, body, pdf_path=None):
                                 f"attachment; filename=result_{to.split('@')[0]}.pdf")
                 msg.attach(part)
 
-            with smtplib.SMTP("smtp.gmail.com", 587) as s:
-                s.starttls()
-                s.login(SMTP_SENDER, SMTP_PASSWORD)
-                s.send_message(msg)
+            if SMTP_USE_SSL:
+                with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT) as s:
+                    s.login(SMTP_SENDER, SMTP_PASSWORD)
+                    s.send_message(msg)
+            else:
+                with smtplib.SMTP("smtp.gmail.com", SMTP_PORT) as s:
+                    s.starttls()
+                    s.login(SMTP_SENDER, SMTP_PASSWORD)
+                    s.send_message(msg)
             print(f"[EMAIL] Sent to {to}")
         except Exception as e:
             print(f"[EMAIL ERROR] {e}")
@@ -176,7 +178,7 @@ def notify_user_login(to_email, username):
 
 def notify_admin_new_register(username, email, role="user", token=""):
     """Tell Navya someone registered — includes one-click Approve button."""
-    approve_url = f"http://127.0.0.1:5000/approve_token/{token}"
+    approve_url = f"{request.host_url.rstrip('/')}/approve_token/{token}"
     body = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;border:1px solid #ddd;border-radius:10px;padding:24px;">
       <h2 style="color:#333;">New Registration — Approval Needed</h2>
@@ -211,6 +213,32 @@ CSS = """
 @app.route('/')
 def index():
     return redirect('/login')
+
+@app.route('/test_email')
+def test_email():
+    from config import ADMIN_EMAIL, SMTP_SENDER, SMTP_PORT, SMTP_USE_SSL, SMTP_PASSWORD
+    import smtplib
+    from email.mime.text import MIMEText
+    
+    res = f"Testing Email with: Port={SMTP_PORT}, SSL={SMTP_USE_SSL}, Sender={SMTP_SENDER}<br>"
+    try:
+        msg = MIMEText("This is a test email from your Quiz Platform.")
+        msg["Subject"] = "SMTP Test"
+        msg["From"] = SMTP_SENDER
+        msg["To"] = ADMIN_EMAIL
+        
+        if SMTP_USE_SSL:
+            with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
+                s.login(SMTP_SENDER, SMTP_PASSWORD)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
+                s.starttls()
+                s.login(SMTP_SENDER, SMTP_PASSWORD)
+                s.send_message(msg)
+        return res + "<h3 style='color:green'>Success! Email sent.</h3>"
+    except Exception as e:
+        return res + f"<h3 style='color:red'>Failed!</h3> Error: {str(e)}"
 
 
 @app.route('/login', methods=['GET', 'POST'])

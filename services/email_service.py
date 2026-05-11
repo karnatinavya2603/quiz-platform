@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from config import SMTP_SENDER, SMTP_PASSWORD, ADMIN_EMAIL
+from config import SMTP_SENDER, SMTP_PASSWORD, ADMIN_EMAIL, SMTP_PORT, SMTP_USE_SSL
 
 
 def send_email_async(to, subject, body, pdf_path=None):
@@ -26,13 +26,21 @@ def send_email_async(to, subject, body, pdf_path=None):
                                 f"attachment; filename=result_{to.split('@')[0]}.pdf")
                 msg.attach(part)
 
-            with smtplib.SMTP("smtp.gmail.com", 587) as s:
-                s.starttls()
-                s.login(SMTP_SENDER, SMTP_PASSWORD)
-                s.send_message(msg)
+            if SMTP_USE_SSL:
+                with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT) as s:
+                    s.login(SMTP_SENDER, SMTP_PASSWORD)
+                    s.send_message(msg)
+            else:
+                with smtplib.SMTP("smtp.gmail.com", SMTP_PORT) as s:
+                    s.starttls()
+                    s.login(SMTP_SENDER, SMTP_PASSWORD)
+                    s.send_message(msg)
             print(f"[EMAIL] Sent to {to}")
         except Exception as e:
-            print(f"[EMAIL ERROR] {e}")
+            print(f"[EMAIL ERROR] Type: {type(e).__name__}, Msg: {e}")
+            # Log more details if it's an SMTP error
+            if isinstance(e, smtplib.SMTPException):
+                print(f"[SMTP DETAILS] Port: {SMTP_PORT}, SSL: {SMTP_USE_SSL}, Sender: {SMTP_SENDER}")
     threading.Thread(target=_send, daemon=True).start()
 
 

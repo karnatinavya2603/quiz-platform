@@ -4,8 +4,9 @@ from flask import Blueprint, request, redirect, session, render_template_string
 from database import get_db
 from services.email_service import (
     notify_admin_login, notify_user_login,
-    notify_admin_registration
+    notify_admin_registration, send_email_async
 )
+import smtplib
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -15,6 +16,32 @@ CSS = '<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstr
 @auth_bp.route('/')
 def index():
     return redirect('/login')
+
+@auth_bp.route('/test_email')
+def test_email():
+    from config import ADMIN_EMAIL, SMTP_SENDER, SMTP_PORT, SMTP_USE_SSL, SMTP_PASSWORD
+    import smtplib
+    from email.mime.text import MIMEText
+    
+    res = f"Testing Email with: Port={SMTP_PORT}, SSL={SMTP_USE_SSL}, Sender={SMTP_SENDER}<br>"
+    try:
+        msg = MIMEText("This is a test email from your Quiz Platform.")
+        msg["Subject"] = "SMTP Test"
+        msg["From"] = SMTP_SENDER
+        msg["To"] = ADMIN_EMAIL
+        
+        if SMTP_USE_SSL:
+            with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
+                s.login(SMTP_SENDER, SMTP_PASSWORD)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
+                s.starttls()
+                s.login(SMTP_SENDER, SMTP_PASSWORD)
+                s.send_message(msg)
+        return res + "<h3 style='color:green'>Success! Email sent.</h3>"
+    except Exception as e:
+        return res + f"<h3 style='color:red'>Failed!</h3> Error: {str(e)}"
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
