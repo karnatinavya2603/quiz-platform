@@ -219,14 +219,40 @@ def test_email():
     from config import ADMIN_EMAIL, SMTP_SENDER, SMTP_PORT, SMTP_USE_SSL, SMTP_PASSWORD
     import smtplib
     from email.mime.text import MIMEText
+    import os
+    import requests
+    import json
     
-    res = f"Testing Email with: Port={SMTP_PORT}, SSL={SMTP_USE_SSL}, Sender={SMTP_SENDER}<br>"
+    sg_key = os.environ.get("SENDGRID_API_KEY")
+    res = f"<b>System:</b> Render Free Tier (SMTP usually blocked)<br>"
+    res += f"<b>Config:</b> Port={SMTP_PORT}, SSL={SMTP_USE_SSL}, Sender={SMTP_SENDER}<br>"
+    res += f"<b>SendGrid API Key:</b> {'Found' if sg_key else 'NOT FOUND (Please add to Render Environment)'}<br><hr>"
+    
+    if sg_key:
+        res += "Trying SendGrid API... "
+        try:
+            url = "https://api.sendgrid.com/v3/mail/send"
+            headers = {"Authorization": f"Bearer {sg_key}", "Content-Type": "application/json"}
+            payload = {
+                "personalizations": [{"to": [{"email": ADMIN_EMAIL}]}],
+                "from": {"email": SMTP_SENDER},
+                "subject": "SendGrid API Test",
+                "content": [{"type": "text/html", "value": "Test successful via SendGrid API!"}]
+            }
+            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+            if resp.status_code in (200, 201, 202):
+                return res + "<h3 style='color:green'>Success! Email sent via SendGrid API.</h3>"
+            else:
+                res += f"<span style='color:red'>Failed API</span> (Status {resp.status_code}: {resp.text})<br>"
+        except Exception as e:
+            res += f"<span style='color:red'>API Error:</span> {e}<br>"
+            
+    res += "Trying standard SMTP fallback... "
     try:
-        msg = MIMEText("This is a test email from your Quiz Platform.")
+        msg = MIMEText("This is a test email via SMTP.")
         msg["Subject"] = "SMTP Test"
         msg["From"] = SMTP_SENDER
         msg["To"] = ADMIN_EMAIL
-        
         if SMTP_USE_SSL:
             with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
                 s.login(SMTP_SENDER, SMTP_PASSWORD)
@@ -236,9 +262,9 @@ def test_email():
                 s.starttls()
                 s.login(SMTP_SENDER, SMTP_PASSWORD)
                 s.send_message(msg)
-        return res + "<h3 style='color:green'>Success! Email sent.</h3>"
+        return res + "<h3 style='color:green'>Success! Email sent via SMTP.</h3>"
     except Exception as e:
-        return res + f"<h3 style='color:red'>Failed!</h3> Error: {str(e)}"
+        return res + f"<h3 style='color:red'>SMTP Failed!</h3> Error: {str(e)}<br><p>Since you are on Render Free Tier, this error is expected. Please add a <b>SENDGRID_API_KEY</b> to fix this.</p>"
 
 
 @app.route('/login', methods=['GET', 'POST'])

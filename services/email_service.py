@@ -1,16 +1,46 @@
-import smtplib
-import threading
-import os
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
+import requests
 from config import SMTP_SENDER, SMTP_PASSWORD, ADMIN_EMAIL, SMTP_PORT, SMTP_USE_SSL
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
 
 
 def send_email_async(to, subject, body, pdf_path=None):
     def _send():
+        # 1. Try SendGrid API first (works on Render Free Tier)
+        if SENDGRID_API_KEY:
+            try:
+                import json
+                url = "https://api.sendgrid.com/v3/mail/send"
+                headers = {
+                    "Authorization": f"Bearer {SENDGRID_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "personalizations": [{"to": [{"email": to}]}],
+                    "from": {"email": SMTP_SENDER},
+                    "subject": subject,
+                    "content": [{"type": "text/html", "value": body}]
+                }
+                
+                # Note: SendGrid attachments are complex to do with simple requests, 
+                # so we'll skip the PDF for the API version for now, or just focus on registration.
+                
+                resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+                if resp.status_code in (200, 201, 202):
+                    print(f"[SENDGRID] Sent to {to}")
+                    return
+                else:
+                    print(f"[SENDGRID ERROR] Status: {resp.status_code}, Resp: {resp.text}")
+            except Exception as e:
+                print(f"[SENDGRID EXCEPTION] {e}")
+
+        # 2. Fallback to SMTP (Works locally, blocked on Render Free)
         try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.base import MIMEBase
+            from email import encoders
+
             msg = MIMEMultipart("mixed")
             msg["Subject"] = subject
             msg["From"]    = SMTP_SENDER
@@ -27,20 +57,17 @@ def send_email_async(to, subject, body, pdf_path=None):
                 msg.attach(part)
 
             if SMTP_USE_SSL:
-                with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT) as s:
+                with smtplib.SMTP_SSL("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
                     s.login(SMTP_SENDER, SMTP_PASSWORD)
                     s.send_message(msg)
             else:
-                with smtplib.SMTP("smtp.gmail.com", SMTP_PORT) as s:
+                with smtplib.SMTP("smtp.gmail.com", SMTP_PORT, timeout=10) as s:
                     s.starttls()
                     s.login(SMTP_SENDER, SMTP_PASSWORD)
                     s.send_message(msg)
-            print(f"[EMAIL] Sent to {to}")
+            print(f"[SMTP] Sent to {to}")
         except Exception as e:
-            print(f"[EMAIL ERROR] Type: {type(e).__name__}, Msg: {e}")
-            # Log more details if it's an SMTP error
-            if isinstance(e, smtplib.SMTPException):
-                print(f"[SMTP DETAILS] Port: {SMTP_PORT}, SSL: {SMTP_USE_SSL}, Sender: {SMTP_SENDER}")
+            print(f"[SMTP ERROR] {e}")
     threading.Thread(target=_send, daemon=True).start()
 
 
