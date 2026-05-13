@@ -45,11 +45,6 @@ def dashboard():
     active_quizzes = []
     for q in active_quizzes_raw:
         q_dict = dict(q)
-        q_dict['is_expired'] = False
-        if q_dict.get('created_at'):
-            created = datetime.strptime(q_dict['created_at'], "%Y-%m-%d %H:%M:%S")
-            if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
-                q_dict['is_expired'] = True
         
         # Per-quiz lockout logic
         q_dict['is_locked'] = False
@@ -170,8 +165,6 @@ def dashboard():
                 <button class="btn btn-success btn-sm disabled">Passed &#10004;</button>
               {% elif quiz.is_locked %}
                 <button class="btn btn-secondary btn-sm disabled">{{ quiz.lock_message }}</button>
-              {% elif quiz.is_expired %}
-                <button class="btn btn-danger btn-sm disabled">Expired</button>
               {% else %}
                 <a href="/instructions?quiz_id={{ quiz.id }}" class="btn btn-{{ 'primary' if quiz.cat_type == 'mcq' else ('success' if quiz.cat_type == 'coding' else 'info') }} btn-sm">Start Quiz</a>
               {% endif %}

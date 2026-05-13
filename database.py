@@ -150,7 +150,7 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('exam_started', '0')")
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('pass_percentage', '60')")
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('retake_wait_days', '7')")
-        conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('quiz_expiry_hours', '48')")
+        conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('quiz_expiry_hours', '8760')")
         
         # Seed initial data
         conn.execute("INSERT OR REPLACE INTO categories(id, name, type) VALUES(1, 'Python Programming MCQs', 'mcq')")
