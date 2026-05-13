@@ -9,6 +9,23 @@ from services.email_service import send_result_email, notify_admin_login
 
 exam_bp = Blueprint('exam', __name__)
 
+def is_quiz_locked(conn, quiz_id, username):
+    settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
+    wait_days = int(settings.get('retake_wait_days', 7))
+    pass_per = float(settings.get('pass_percentage', 60))
+
+    last_attempt = conn.execute("""
+        SELECT attempt_date, percentage FROM user_quiz_attempts 
+        WHERE username=? AND quiz_id=? 
+        ORDER BY attempt_date DESC LIMIT 1
+    """, (username, quiz_id)).fetchone()
+
+    if last_attempt and last_attempt['percentage'] < pass_per:
+        last_date = datetime.strptime(last_attempt['attempt_date'], "%Y-%m-%d %H:%M:%S")
+        if (datetime.now() - last_date).total_seconds() < wait_days * 24 * 3600:
+            return True, wait_days
+    return False, wait_days
+
 @exam_bp.route('/instructions')
 def instructions():
     if session.get('role') != 'user':
@@ -34,14 +51,31 @@ def instructions():
         conn.close()
         return redirect('/dashboard')
         
+    settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
+    
+    # Check for per-quiz lockout
+    locked, wait_days = is_quiz_locked(conn, quiz_id, session['username'])
+    if locked:
+        conn.close()
+        return render_template_string("""
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+            <div class="container mt-5 text-center">
+                <div class="alert alert-warning">
+                    <h4>Quiz Locked</h4>
+                    <p>try again user after {{ wait_days }} days.</p>
+                    <a href="/dashboard" class="btn btn-primary">Back to Dashboard</a>
+                </div>
+            </div>
+        """, wait_days=wait_days)
+
     if quiz['created_at']:
-        settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
         expiry_h = int(settings.get('quiz_expiry_hours', 48))
         created = datetime.strptime(quiz['created_at'], "%Y-%m-%d %H:%M:%S")
         if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
             conn.close()
             return redirect('/dashboard')
     conn.close()
+
 
     title = quiz['name']
     duration = f"{quiz['time_limit']} Minutes" if quiz['time_limit'] > 0 else "Unlimited"
@@ -158,6 +192,10 @@ def quiz():
     quiz_id = session['quiz_id']
 
     conn = get_db()
+    locked, wait_days = is_quiz_locked(conn, quiz_id, session['username'])
+    if locked:
+        conn.close()
+        return redirect('/dashboard')
     quiz = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
 
     if not quiz:
@@ -485,6 +523,10 @@ def coding():
     quiz_id = session['quiz_id']
 
     conn = get_db()
+    locked, wait_days = is_quiz_locked(conn, quiz_id, session['username'])
+    if locked:
+        conn.close()
+        return redirect('/dashboard')
     quiz = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
 
     if not quiz:
@@ -1014,7 +1056,7 @@ def result():
         {% if cheated %}
           <div class="alert alert-danger"><b>Warning:</b> Your exam was terminated because you switched tabs or left the browser window.</div>
         {% elif percentage < pass_per %}
-          <div class="alert alert-warning"><b>Retake Policy:</b> You did not reach the {{ pass_per }}% passing criteria. You can try again after <b>{{ wait_days }} days</b>.</div>
+          <div class="alert alert-warning"><b>Retake Policy:</b> try again user after <b>{{ wait_days }} days</b>.</div>
         {% else %}
           <div class="alert alert-success">Congratulations! You have successfully passed the assessment.</div>
         {% endif %}

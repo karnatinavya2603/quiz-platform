@@ -73,7 +73,7 @@ def dashboard():
                     if d > 0: parts.append(f"{d}d")
                     if h > 0: parts.append(f"{h}h")
                     if m > 0: parts.append(f"{m}m")
-                    q_dict['lock_message'] = "Try again in " + " ".join(parts)
+                    q_dict['lock_message'] = f"Try again after {wait_days} days"
         
         active_quizzes.append(q_dict)
     
@@ -169,7 +169,7 @@ def dashboard():
               {% if quiz.is_passed %}
                 <button class="btn btn-success btn-sm disabled">Passed &#10004;</button>
               {% elif quiz.is_locked %}
-                <button class="btn btn-secondary btn-sm disabled">Locked ({{ quiz.lock_message.replace('Try again in ', '') }})</button>
+                <button class="btn btn-secondary btn-sm disabled">{{ quiz.lock_message }}</button>
               {% elif quiz.is_expired %}
                 <button class="btn btn-danger btn-sm disabled">Expired</button>
               {% else %}
