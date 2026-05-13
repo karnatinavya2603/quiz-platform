@@ -68,12 +68,6 @@ def instructions():
             </div>
         """, wait_days=wait_days)
 
-    if quiz['created_at']:
-        expiry_h = int(settings.get('quiz_expiry_hours', 48))
-        created = datetime.strptime(quiz['created_at'], "%Y-%m-%d %H:%M:%S")
-        if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
-            conn.close()
-            return redirect('/dashboard')
     conn.close()
 
 
@@ -202,13 +196,6 @@ def quiz():
         conn.close()
         return redirect('/dashboard')
 
-    if quiz['created_at']:
-        settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
-        expiry_h = int(settings.get('quiz_expiry_hours', 48))
-        created = datetime.strptime(quiz['created_at'], "%Y-%m-%d %H:%M:%S")
-        if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
-            conn.close()
-            return redirect('/dashboard')
     conn.close()
 
     if 'q_list' not in session:
@@ -533,13 +520,6 @@ def coding():
         conn.close()
         return redirect('/dashboard')
 
-    if quiz['created_at']:
-        settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
-        expiry_h = int(settings.get('quiz_expiry_hours', 48))
-        created = datetime.strptime(quiz['created_at'], "%Y-%m-%d %H:%M:%S")
-        if (datetime.now() - created).total_seconds() >= expiry_h * 3600:
-            conn.close()
-            return redirect('/dashboard')
     conn.close()
 
     if 'c_list' not in session:
