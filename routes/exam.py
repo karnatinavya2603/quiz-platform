@@ -10,8 +10,14 @@ from services.email_service import send_result_email, notify_admin_login
 exam_bp = Blueprint('exam', __name__)
 
 def is_quiz_locked(conn, quiz_id, username):
+    def safe_int(v, default=0):
+        try:
+            if v is None: return default
+            return int(float(v))
+        except (ValueError, TypeError): return default
+
     settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
-    wait_days = int(settings.get('retake_wait_days', 7))
+    wait_days = safe_int(settings.get('retake_wait_days'), 7)
     pass_per = float(settings.get('pass_percentage', 60))
 
     last_attempt = conn.execute("""
@@ -20,10 +26,14 @@ def is_quiz_locked(conn, quiz_id, username):
         ORDER BY attempt_date DESC LIMIT 1
     """, (username, quiz_id)).fetchone()
 
-    if last_attempt and last_attempt['percentage'] < pass_per:
-        last_date = datetime.strptime(last_attempt['attempt_date'], "%Y-%m-%d %H:%M:%S")
-        if (datetime.now() - last_date).total_seconds() < wait_days * 24 * 3600:
-            return True, wait_days
+    try:
+        if last_attempt and last_attempt['attempt_date'] and last_attempt['percentage'] is not None:
+            if float(last_attempt['percentage']) < pass_per:
+                last_date = datetime.strptime(str(last_attempt['attempt_date']), "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - last_date).total_seconds() < wait_days * 24 * 3600:
+                    return True, wait_days
+    except (ValueError, TypeError):
+        pass
     return False, wait_days
 
 @exam_bp.route('/instructions')
@@ -47,6 +57,7 @@ def instructions():
         WHERE q.id = ?
     """, (quiz_id,)).fetchone()
     
+    quiz = dict(quiz) if quiz else None
     if not quiz:
         conn.close()
         return redirect('/dashboard')
@@ -71,8 +82,24 @@ def instructions():
     conn.close()
 
 
+    def safe_int(v, default=0):
+        try: return int(v) if str(v).strip() != '' else default
+        except (ValueError, TypeError): return default
+        
     title = quiz['name']
-    duration = f"{quiz['time_limit']} Minutes" if quiz['time_limit'] > 0 else "Unlimited"
+    if quiz['cat_type'] == 'mixed':
+        mcq_t = safe_int(quiz.get('mcq_time_limit'))
+        mcq_time = f"{mcq_t} mins" if mcq_t > 0 else "Unlimited"
+        cod_t = safe_int(quiz.get('coding_time_limit'))
+        coding_time = f"{cod_t} mins" if cod_t > 0 else "Unlimited"
+        duration = f"MCQ: {mcq_time} | Coding: {coding_time}"
+    elif quiz['cat_type'] == 'mcq':
+        time_val = safe_int(quiz.get('mcq_time_limit')) or safe_int(quiz.get('time_limit'))
+        duration = f"{time_val} Minutes" if time_val > 0 else "Unlimited"
+    else:
+        time_val = safe_int(quiz.get('coding_time_limit')) or safe_int(quiz.get('time_limit'))
+        duration = f"{time_val} Minutes" if time_val > 0 else "Unlimited"
+
     qtype = quiz['cat_type']
     
     # For mixed quizzes, start with MCQ phase first
@@ -191,6 +218,7 @@ def quiz():
         conn.close()
         return redirect('/dashboard')
     quiz = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    quiz = dict(quiz) if quiz else None
 
     if not quiz:
         conn.close()
@@ -246,10 +274,17 @@ def quiz():
 
         session['q_list']  = q_ids
         session['q_index'] = 0
+        
         session['score']   = 0
         session['answered'] = 0
         session['skipped']  = 0
-        limit = quiz['time_limit'] if quiz['time_limit'] > 0 else 10
+        def safe_int(v, default=0):
+            try: return int(v) if str(v).strip() != '' else default
+            except (ValueError, TypeError): return default
+            
+        limit = safe_int(quiz.get('mcq_time_limit'))
+        if limit == 0: limit = safe_int(quiz.get('time_limit'))
+        if limit == 0: limit = 10
         session['mcq_end_time'] = datetime.now().timestamp() + (limit * 60)
         
         with get_db() as conn:
@@ -279,15 +314,20 @@ def quiz():
             if ans:
                 with get_db() as conn:
                     q = dict(conn.execute("SELECT * FROM questions WHERE id=?", (q_id,)).fetchone())
-                    quiz_data = conn.execute("SELECT positive_marks, negative_marks FROM quizzes WHERE id=?", (session['quiz_id'],)).fetchone()
+                    quiz_data = conn.execute("SELECT positive_marks, negative_marks, mcq_marks FROM quizzes WHERE id=?", (session['quiz_id'],)).fetchone()
+                    quiz_data = dict(quiz_data) if quiz_data else None
                 
+                def safe_float(v, default=0.0):
+                    try: return float(v) if str(v).strip() != '' else default
+                    except (ValueError, TypeError): return default
+
                 expected_ans = str(q['answer']).lower().strip()
                 selected_text = str(q.get(ans, '')).lower().strip()
                 
                 if ans == expected_ans or selected_text == expected_ans:
-                    points = quiz_data['positive_marks']
+                    points = safe_float(quiz_data.get('mcq_marks')) if str(quiz_data.get('mcq_marks', '')).strip() != '' else safe_float(quiz_data.get('positive_marks'))
                 else:
-                    points = -quiz_data['negative_marks']
+                    points = -safe_float(quiz_data.get('negative_marks'))
                     
                 mcq_answers[str(q_id)] = ans
                 mcq_points[str(q_id)] = points
@@ -515,6 +555,7 @@ def coding():
         conn.close()
         return redirect('/dashboard')
     quiz = conn.execute("SELECT * FROM quizzes WHERE id=?", (quiz_id,)).fetchone()
+    quiz = dict(quiz) if quiz else None
 
     if not quiz:
         conn.close()
@@ -566,15 +607,18 @@ def coding():
         session['c_index']      = 0
         session['coding_score'] = 0
         session['test_results'] = []
+        
         session['all_results']  = []
         session.setdefault('score', 0)
         
-        if session.get('is_mixed') and session.get('mcq_end_time'):
-            # For mixed quizzes, reuse the shared timer from MCQ phase
-            session['coding_end_time'] = session['mcq_end_time']
-        else:
-            limit = quiz['time_limit'] if quiz['time_limit'] > 0 else 30
-            session['coding_end_time'] = datetime.now().timestamp() + (limit * 60)
+        def safe_int(v, default=0):
+            try: return int(v) if str(v).strip() != '' else default
+            except (ValueError, TypeError): return default
+
+        limit = safe_int(quiz.get('coding_time_limit'))
+        if limit == 0: limit = safe_int(quiz.get('time_limit'))
+        if limit == 0: limit = 30
+        session['coding_end_time'] = datetime.now().timestamp() + (limit * 60)
 
     if session.get('c_index', 0) >= len(session.get('c_list', [])):
         return redirect('/result')
@@ -592,10 +636,15 @@ def coding():
         if action in ['submit', 'next', 'previous']:
             coding_drafts[str(c_id)] = code
             if code.strip():
+                def safe_float(v, default=0.0):
+                    try: return float(v) if str(v).strip() != '' else default
+                    except (ValueError, TypeError): return default
+                    
                 with get_db() as conn:
                     q = dict(conn.execute("SELECT * FROM coding_questions WHERE id=?", (c_id,)).fetchone())
-                    quiz_data = conn.execute("SELECT positive_marks FROM quizzes WHERE id=?", (session['quiz_id'],)).fetchone()
-                    points_max = quiz_data['positive_marks'] if quiz_data else 15
+                    quiz_data = conn.execute("SELECT positive_marks, coding_marks FROM quizzes WHERE id=?", (session['quiz_id'],)).fetchone()
+                    quiz_data = dict(quiz_data) if quiz_data else None
+                    points_max = safe_float(quiz_data.get('coding_marks')) if quiz_data and str(quiz_data.get('coding_marks', '')).strip() != '' else (safe_float(quiz_data.get('positive_marks')) if quiz_data else 15.0)
         
                 tests   = generate_testcases(q['question'])
                 results = []
@@ -886,9 +935,6 @@ def coding():
                 document.getElementById('passed-count').innerText = data.passed;
                 document.getElementById('failed-count').innerText = data.total - data.passed;
                 
-                document.getElementById('test-summary').innerText = `(${data.passed}/${data.total})`;
-                document.getElementById('test-summary').className = 'ms-1 small ' + (data.all_passed ? 'text-success' : 'text-danger');
-
                 document.getElementById('test-case-list').innerHTML = data.results.map((r, i) => `
                     <div class="test-case ${r.status.toLowerCase()}">
                         <div class="d-flex justify-content-between mb-2">
@@ -902,6 +948,10 @@ def coding():
                         </div>
                     </div>
                 `).join('');
+            })
+            .catch(e => {
+                document.getElementById('save-status').innerText = 'IDLE: ERROR';
+                document.getElementById('test-case-list').innerHTML = `<div class="text-danger p-4 text-center">Failed to run tests: ${e.message}</div>`;
             });
         }
 
@@ -985,9 +1035,16 @@ def result():
     with get_db() as conn:
         quiz = conn.execute("SELECT * FROM quizzes WHERE id=?", (session.get('quiz_id'),)).fetchone()
         if quiz:
-            pos_marks = quiz['positive_marks']
-            max_mcq = len(session.get('q_list', [])) * pos_marks
-            max_coding = len(session.get('c_list', [])) * pos_marks
+            quiz = dict(quiz)
+            def safe_float(v, default=0.0):
+                try: return float(v) if str(v).strip() != '' else default
+                except (ValueError, TypeError): return default
+
+            mcq_marks = safe_float(quiz.get('mcq_marks')) if str(quiz.get('mcq_marks', '')).strip() != '' else safe_float(quiz.get('positive_marks'))
+            coding_marks = safe_float(quiz.get('coding_marks')) if str(quiz.get('coding_marks', '')).strip() != '' else safe_float(quiz.get('positive_marks'))
+            
+            max_mcq = len(session.get('q_list', [])) * mcq_marks
+            max_coding = len(session.get('c_list', [])) * coding_marks
     
     max_total = max_mcq + max_coding
     percentage = (total_score / max_total * 100) if max_total > 0 else 0

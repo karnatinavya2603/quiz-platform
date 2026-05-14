@@ -601,6 +601,20 @@ def admin_quizzes():
         JOIN categories c ON q.category_id = c.id
         ORDER BY q.id DESC
     """).fetchall()
+    active_quizzes = []
+    for q in quizzes:
+        q_dict = dict(q)
+        if q_dict['cat_type'] == 'mixed':
+            mcq_time = f"{q_dict.get('mcq_time_limit', 0)}m" if q_dict.get('mcq_time_limit', 0) > 0 else "Unltd"
+            coding_time = f"{q_dict.get('coding_time_limit', 0)}m" if q_dict.get('coding_time_limit', 0) > 0 else "Unltd"
+            q_dict['display_time'] = f"M:{mcq_time}|C:{coding_time}"
+        elif q_dict['cat_type'] == 'mcq':
+            t = q_dict.get('mcq_time_limit') or q_dict['time_limit']
+            q_dict['display_time'] = f"{t}m" if t > 0 else "Unltd"
+        else:
+            t = q_dict.get('coding_time_limit') or q_dict['time_limit']
+            q_dict['display_time'] = f"{t}m" if t > 0 else "Unltd"
+        active_quizzes.append(q_dict)
     conn.close()
     return render_template_string(CSS + SIDEBAR + """
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -613,12 +627,12 @@ def admin_quizzes():
           <tr><th>Quiz Name</th><th>Category</th><th>Type</th><th>Duration</th><th>Questions</th><th>Action</th></tr>
         </thead>
         <tbody>
-        {% for q in quizzes %}
+        {% for q in active_quizzes %}
           <tr>
             <td><b class="text-primary">{{ q.name }}</b></td>
             <td>{{ q.cat_name }}</td>
             <td><span class="badge {{ 'bg-primary' if q.cat_type == 'mcq' else ('bg-success' if q.cat_type == 'coding' else 'bg-purple') }}" {% if q.cat_type == 'mixed' %}style="background:#7c3aed;"{% endif %}>{{ q.cat_type|upper }}</span></td>
-            <td>{{ q.time_limit }} min</td>
+            <td>{{ q.display_time }}</td>
             <td>{{ q.q_count }}</td>
             <td>
               <a href="/admin/quiz/delete/{{ q.id }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this quiz permanently?')">Delete</a>
@@ -630,7 +644,7 @@ def admin_quizzes():
         </tbody>
       </table>
     </div>
-    """, quizzes=quizzes, active='quizzes')
+    """, active_quizzes=active_quizzes, active='quizzes')
 
 
 @admin_bp.route('/admin/quiz/delete/<int:qid>')
@@ -1170,17 +1184,33 @@ def quiz_create():
     if request.method == 'POST':
         name = request.form.get('quiz_name')
         cat_id = request.form.get('category_id')
-        time_limit = request.form.get('time_limit', 0)
-        pos_marks = request.form.get('pos_marks', 1)
-        neg_marks = request.form.get('neg_marks', 0)
+        def safe_int(v, default=0):
+            try: return int(v) if str(v).strip() != '' else default
+            except (ValueError, TypeError): return default
+
+        def safe_float(v, default=1.0):
+            try:
+                val = float(v) if str(v).strip() != '' else default
+                return int(val) if val.is_integer() else val
+            except (ValueError, TypeError): return default
+
+        time_limit = safe_int(request.form.get('time_limit'), 0)
+        pos_marks = safe_float(request.form.get('pos_marks'), 1)
+        neg_marks = safe_float(request.form.get('neg_marks'), 0)
+        
+        mcq_time_limit = safe_int(request.form.get('mcq_time_limit'), time_limit)
+        coding_time_limit = safe_int(request.form.get('coding_time_limit'), time_limit)
+        mcq_marks = safe_float(request.form.get('mcq_marks'), pos_marks)
+        coding_marks = safe_float(request.form.get('coding_marks'), pos_marks)
+
         shuffle = 1 if request.form.get('shuffle') else 0
-        attempts = request.form.get('attempts', 1)
+        attempts = safe_int(request.form.get('attempts'), 1)
         
         # Save Quiz
         cur = conn.execute("""
-            INSERT INTO quizzes (name, category_id, time_limit, positive_marks, negative_marks, shuffle_questions, attempt_limit, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, cat_id, time_limit, pos_marks, neg_marks, shuffle, attempts, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            INSERT INTO quizzes (name, category_id, time_limit, positive_marks, negative_marks, shuffle_questions, attempt_limit, created_at, mcq_time_limit, coding_time_limit, mcq_marks, coding_marks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, cat_id, time_limit, pos_marks, neg_marks, shuffle, attempts, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), mcq_time_limit, coding_time_limit, mcq_marks, coding_marks))
         quiz_id = cur.lastrowid
         
         selection_mode = request.form.get('selection_mode') # 'random' or 'manual'
@@ -1231,14 +1261,26 @@ def quiz_create():
 
         <!-- Section 2: Rules -->
         <div class="col-12"><hr></div>
-        <div class="col-md-3">
-          <label class="form-label fw-bold">Time Limit (mins)</label>
-          <input type="number" name="time_limit" class="form-control" value="30">
+        <!-- MCQ Rules -->
+        <div class="col-md-3 rule-mcq d-none">
+          <label class="form-label fw-bold text-primary">MCQ Time Limit (mins)</label>
+          <input type="number" name="mcq_time_limit" class="form-control" value="30">
           <small class="text-muted">0 for no limit</small>
         </div>
-        <div class="col-md-3">
-          <label class="form-label fw-bold">Positive Marks</label>
-          <input type="number" step="0.1" name="pos_marks" class="form-control" value="1">
+        <div class="col-md-3 rule-mcq d-none">
+          <label class="form-label fw-bold text-primary">MCQ Positive Marks</label>
+          <input type="number" step="0.1" name="mcq_marks" class="form-control" value="1">
+        </div>
+
+        <!-- Coding Rules -->
+        <div class="col-md-3 rule-coding d-none">
+          <label class="form-label fw-bold text-success">Coding Time Limit (mins)</label>
+          <input type="number" name="coding_time_limit" class="form-control" value="45">
+          <small class="text-muted">0 for no limit</small>
+        </div>
+        <div class="col-md-3 rule-coding d-none">
+          <label class="form-label fw-bold text-success">Coding Positive Marks</label>
+          <input type="number" step="0.1" name="coding_marks" class="form-control" value="15">
         </div>
         <div class="col-md-3">
           <label class="form-label fw-bold">Negative Marks</label>
@@ -1312,6 +1354,10 @@ def quiz_create():
         const catId = catSel.value;
         const selectedOpt = catSel.options[catSel.selectedIndex];
         const catType = selectedOpt ? selectedOpt.dataset.type : '';
+        
+        document.querySelectorAll('.rule-mcq').forEach(el => el.classList.toggle('d-none', !(catType === 'mcq' || catType === 'mixed')));
+        document.querySelectorAll('.rule-coding').forEach(el => el.classList.toggle('d-none', !(catType === 'coding' || catType === 'mixed')));
+
         
         document.querySelectorAll('.topic-row').forEach(row => {
           if (catType === 'mixed') {

@@ -94,8 +94,29 @@ def init_db():
             attempt_limit     INTEGER DEFAULT 1,
             is_active         INTEGER DEFAULT 1,
             created_at        TEXT,
+            mcq_time_limit    INTEGER DEFAULT 0,
+            coding_time_limit INTEGER DEFAULT 0,
+            mcq_marks         REAL DEFAULT 1,
+            coding_marks      REAL DEFAULT 1,
             FOREIGN KEY (category_id) REFERENCES categories(id)
         )""")
+        
+        try:
+            conn.execute("ALTER TABLE quizzes ADD COLUMN mcq_time_limit INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE quizzes ADD COLUMN coding_time_limit INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE quizzes ADD COLUMN mcq_marks REAL DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE quizzes ADD COLUMN coding_marks REAL DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
         
         conn.execute("""
         CREATE TABLE IF NOT EXISTS quiz_topics (

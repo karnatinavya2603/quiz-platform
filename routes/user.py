@@ -15,11 +15,17 @@ def dashboard():
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE username=?", (session['username'],)).fetchone()
     
+    def safe_int(v, default=0):
+        try:
+            if v is None: return default
+            return int(float(v))
+        except (ValueError, TypeError): return default
+
     # Fetch dynamic settings
     settings = {row['key']: row['value'] for row in conn.execute("SELECT * FROM settings").fetchall()}
     pass_per = float(settings.get('pass_percentage', 60))
-    wait_days = int(settings.get('retake_wait_days', 7))
-    expiry_h = int(settings.get('quiz_expiry_hours', 48))
+    wait_days = safe_int(settings.get('retake_wait_days'), 7)
+    expiry_h = safe_int(settings.get('quiz_expiry_hours'), 48)
 
     # Fetch user attempts for per-quiz lockout
     user_attempts = conn.execute("""
@@ -52,23 +58,50 @@ def dashboard():
         q_dict['is_passed'] = False
         
         att = attempts_by_quiz.get(q_dict['id'])
-        if att:
-            if att['percentage'] >= pass_per:
-                q_dict['is_passed'] = True
-            else:
-                last_date = datetime.strptime(att['attempt_date'], "%Y-%m-%d %H:%M:%S")
-                diff = datetime.now() - last_date
-                if diff.total_seconds() < wait_days * 24 * 3600:
-                    q_dict['is_locked'] = True
-                    rem_seconds = int(wait_days * 24 * 3600 - diff.total_seconds())
-                    d = rem_seconds // (24 * 3600)
-                    h = (rem_seconds % (24 * 3600)) // 3600
-                    m = (rem_seconds % 3600) // 60
-                    parts = []
-                    if d > 0: parts.append(f"{d}d")
-                    if h > 0: parts.append(f"{h}h")
-                    if m > 0: parts.append(f"{m}m")
-                    q_dict['lock_message'] = f"Try again after {wait_days} days"
+        if att and att['attempt_date'] and att['percentage'] is not None:
+            try:
+                if float(att['percentage']) >= pass_per:
+                    q_dict['is_passed'] = True
+                else:
+                    last_date = datetime.strptime(str(att['attempt_date']), "%Y-%m-%d %H:%M:%S")
+                    diff = datetime.now() - last_date
+                    if diff.total_seconds() < wait_days * 24 * 3600:
+                        q_dict['is_locked'] = True
+                        q_dict['lock_message'] = f"Try again after {wait_days} days"
+            except (ValueError, TypeError):
+                pass
+                    
+        def safe_int(v, default=0):
+            try: return int(v) if str(v).strip() != '' else default
+            except (ValueError, TypeError): return default
+
+        def safe_float(v, default=1.0):
+            try:
+                val = float(v) if str(v).strip() != '' else default
+                return int(val) if val.is_integer() else val
+            except (ValueError, TypeError): return default
+
+        # Calculate display limits
+        if q_dict['cat_type'] == 'mixed':
+            mcq_time_val = safe_int(q_dict.get('mcq_time_limit'), 0)
+            mcq_time = f"{mcq_time_val}m" if mcq_time_val > 0 else "Unltd"
+            coding_time_val = safe_int(q_dict.get('coding_time_limit'), 0)
+            coding_time = f"{coding_time_val}m" if coding_time_val > 0 else "Unltd"
+            q_dict['display_time'] = f"MCQ: {mcq_time} | Code: {coding_time}"
+            
+            mcq_marks = safe_float(q_dict.get('mcq_marks'), q_dict['positive_marks'])
+            coding_marks = safe_float(q_dict.get('coding_marks'), q_dict['positive_marks'])
+            q_dict['display_marks'] = f"MCQ: +{mcq_marks} | Code: +{coding_marks}"
+        elif q_dict['cat_type'] == 'mcq':
+            t = safe_int(q_dict.get('mcq_time_limit')) or safe_int(q_dict['time_limit'])
+            q_dict['display_time'] = f"{t} mins" if t > 0 else "Unlimited"
+            m = safe_float(q_dict.get('mcq_marks'), q_dict['positive_marks'])
+            q_dict['display_marks'] = f"+{m}/-{safe_float(q_dict['negative_marks'], 0)} marks"
+        else:
+            t = safe_int(q_dict.get('coding_time_limit')) or safe_int(q_dict['time_limit'])
+            q_dict['display_time'] = f"{t} mins" if t > 0 else "Unlimited"
+            m = safe_float(q_dict.get('coding_marks'), q_dict['positive_marks'])
+            q_dict['display_marks'] = f"+{m} marks"
         
         active_quizzes.append(q_dict)
     
@@ -83,6 +116,9 @@ def dashboard():
 
     status_color = {'not_started': 'secondary', 'in_progress': 'warning', 'completed': 'success'}
     status_label = {'not_started': 'Not Started', 'in_progress': 'In Progress', 'completed': 'Completed'}
+    
+    current_color = status_color.get(quiz_status, 'secondary')
+    current_label = status_label.get(quiz_status, 'Not Started')
 
     return render_template_string(CSS + """
     <style>
@@ -154,7 +190,7 @@ def dashboard():
           <div class="card exam-card h-100 shadow-sm">
             <div style="background:linear-gradient(135deg, {{ '#0061ff,#60efff' if quiz.cat_type == 'mcq' else ('#11998e,#38ef7d' if quiz.cat_type == 'coding' else '#667eea,#764ba2') }});padding:24px;color:#fff;">
               <h5 class="mb-1">{{ quiz.name }}</h5>
-              <p class="mb-0 small" style="opacity:.85;">{{ quiz.cat_name }} | {{ quiz.time_limit }} mins | +{{ quiz.positive_marks }}/-{{ quiz.negative_marks }} marks</p>
+              <p class="mb-0 small" style="opacity:.85;">{{ quiz.cat_name }} | {{ quiz.display_time }} | {{ quiz.display_marks }}</p>
               {% if quiz.cat_type == 'mixed' %}
                 <span class="badge bg-light text-dark mt-2">🔀 MCQ + Coding</span>
               {% endif %}
@@ -205,7 +241,7 @@ def dashboard():
     coding_count=coding_count,
     login_count=login_count,
     last_login=last_login,
-    status_color=status_color[quiz_status],
-    status_label=status_label[quiz_status],
+    status_color=current_color,
+    status_label=current_label,
     pass_per=int(pass_per),
     active_quizzes=active_quizzes)
